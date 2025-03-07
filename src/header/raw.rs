@@ -59,5 +59,8 @@ pub struct RawDbHeader {
     pub sqlite_version: U32,
 }
 
+/// Size on disk of the header in bytes.
+pub const RAW_HEADER_SIZE: usize = 100;
+
 // SQLite header is 100 bytes.
-const_assert_eq!(size_of::<RawDbHeader>(), 100);
+const_assert_eq!(size_of::<RawDbHeader>(), RAW_HEADER_SIZE);

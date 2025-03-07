@@ -5,13 +5,17 @@ use anyhow::Error;
 use derive_more::TryFrom;
 use thiserror::Error;
 
-pub use self::{page_size::PageSize, raw::RawDbHeader};
+pub use self::{
+    page_size::PageSize,
+    raw::{RAW_HEADER_SIZE, RawDbHeader},
+};
 
 /// Header of a SQLite file.
 ///
 /// This is the fully parsed and validated version of the header. See [`RawDbHeader`] for the disk
 /// representation of the header.
 #[allow(unused)]
+#[derive(Clone, Debug)]
 pub struct DbHeader {
     /// Size of each page.
     pub page_size: PageSize,

@@ -6,7 +6,7 @@ const PAGE_SIZE_MIN: u16 = 512;
 /// Maximum size of the SQLite page.
 const PAGE_SIZE_MAX: u16 = 32768;
 /// Size of the SQLite page if the reported size is `1`.
-const PAGE_SIZE_1: u32 = 65536;
+const PAGE_SIZE_1: usize = 65536;
 
 #[derive(Clone, Debug, Error)]
 pub enum PageSizeError {
@@ -18,7 +18,7 @@ pub enum PageSizeError {
 
 /// Size of a database page.
 #[derive(Clone, Copy, Debug, Deref)]
-pub struct PageSize(u32);
+pub struct PageSize(usize);
 
 impl TryFrom<u16> for PageSize {
     type Error = PageSizeError;
@@ -35,14 +35,14 @@ impl TryFrom<u16> for PageSize {
         let value = if value == 1 {
             PAGE_SIZE_1
         } else {
-            value as u32
+            value as usize
         };
 
         Ok(Self(value))
     }
 }
 
-impl From<PageSize> for u32 {
+impl From<PageSize> for usize {
     fn from(size: PageSize) -> Self {
         size.0
     }
@@ -62,7 +62,7 @@ mod test {
     #[case::max(32768)]
     fn good(#[case] raw: u16) {
         let page_size = PageSize::try_from(raw).expect("valid page size");
-        assert_eq!(*page_size, raw as u32);
+        assert_eq!(*page_size, raw as usize);
     }
 
     #[test]
