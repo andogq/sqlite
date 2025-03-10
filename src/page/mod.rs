@@ -198,3 +198,182 @@ impl PageType {
         matches!(self, Self::LeafIndex | Self::LeafTable)
     }
 }
+
+mod page2 {
+    use std::{marker::PhantomData, num::NonZero};
+
+    trait PageType {
+        type Info;
+    }
+
+    trait PageFamily {
+        type Info;
+    }
+
+    struct Table {}
+    impl PageType for Table {
+        type Info = ();
+    }
+
+    struct Index {}
+    impl PageType for Index {
+        type Info = ();
+    }
+
+    struct Leaf {}
+    impl PageFamily for Leaf {
+        type Info = ();
+    }
+
+    struct InteriorInfo {
+        right_pointer: u32,
+    }
+
+    struct Interior {}
+    impl PageFamily for Interior {
+        type Info = InteriorInfo;
+    }
+
+    struct Page<T: PageType, F: PageFamily> {
+        // Common fields for all pages.
+        first_freeblock: Option<NonZero<u16>>,
+        cell_count: u16,
+        cell_content_offset: NonZero<u16>,
+        fragmented_bytes: u8,
+
+        // Fields unique to page variation.
+        type_info: T::Info,
+        family_info: F::Info,
+    }
+
+    struct RowCell {
+        // TODO: make varint
+        rowid: u32,
+    }
+
+    struct InteriorCell {
+        left_child: u32,
+    }
+
+    struct PayloadCell {
+        // TODO: varint
+        length: u32,
+        bytes: Vec<u8>,
+        overflow: u32,
+    }
+
+    mod s {
+        mod private {
+            pub trait Sealed {}
+        }
+
+        pub trait PickAnswer: private::Sealed {}
+        pub struct Yes;
+        impl private::Sealed for Yes {}
+        impl PickAnswer for Yes {}
+        pub struct No;
+        impl private::Sealed for No {}
+        impl PickAnswer for No {}
+    }
+    use s::{No, PickAnswer, Yes};
+
+    trait CellConfig {
+        type Row: PickAnswer;
+        type Interior: PickAnswer;
+        type Payload: PickAnswer;
+    }
+
+    impl CellConfig for (Table, Leaf) {
+        type Row = Yes;
+        type Interior = No;
+        type Payload = Yes;
+    }
+
+    impl CellConfig for (Table, Interior) {
+        type Row = Yes;
+        type Interior = Yes;
+        type Payload = No;
+    }
+
+    impl CellConfig for (Index, Leaf) {
+        type Row = No;
+        type Interior = No;
+        type Payload = Yes;
+    }
+
+    impl CellConfig for (Index, Interior) {
+        type Row = No;
+        type Interior = Yes;
+        type Payload = Yes;
+    }
+
+    struct Pick<T>(PhantomData<fn() -> T>);
+
+    trait Picker<A: PickAnswer> {
+        type Output;
+    }
+
+    impl<T> Picker<Yes> for Pick<T> {
+        type Output = T;
+    }
+    impl<T> Picker<No> for Pick<T> {
+        type Output = ();
+    }
+
+    struct Cell<T: PageType, F: PageFamily>
+    where
+        (T, F): CellConfig,
+        Pick<RowCell>: Picker<<(T, F) as CellConfig>::Row>,
+        Pick<InteriorCell>: Picker<<(T, F) as CellConfig>::Interior>,
+        Pick<PayloadCell>: Picker<<(T, F) as CellConfig>::Payload>,
+    {
+        row: <Pick<RowCell> as Picker<<(T, F) as CellConfig>::Row>>::Output,
+        interior: <Pick<InteriorCell> as Picker<<(T, F) as CellConfig>::Interior>>::Output,
+        payload: <Pick<PayloadCell> as Picker<<(T, F) as CellConfig>::Payload>>::Output,
+    }
+
+    impl<T: PageType, F: PageFamily> Cell<T, F>
+    where
+        (T, F): CellConfig<Row = Yes>,
+        Pick<InteriorCell>: Picker<<(T, F) as CellConfig>::Interior>,
+        Pick<PayloadCell>: Picker<<(T, F) as CellConfig>::Payload>,
+    {
+        fn get_row_id(&self) -> u32 {
+            self.row.rowid
+        }
+    }
+
+    impl<T: PageType, F: PageFamily> Cell<T, F>
+    where
+        (T, F): CellConfig<Interior = Yes>,
+        Pick<RowCell>: Picker<<(T, F) as CellConfig>::Row>,
+        Pick<PayloadCell>: Picker<<(T, F) as CellConfig>::Payload>,
+    {
+        fn get_left_child(&self) -> u32 {
+            self.interior.left_child
+        }
+    }
+
+    impl<T: PageType, F: PageFamily> Cell<T, F>
+    where
+        (T, F): CellConfig<Payload = Yes>,
+        Pick<RowCell>: Picker<<(T, F) as CellConfig>::Row>,
+        Pick<InteriorCell>: Picker<<(T, F) as CellConfig>::Interior>,
+    {
+        fn get_length(&self) -> u32 {
+            self.payload.length
+        }
+
+        fn get_bytes(&self) -> &[u8] {
+            &self.payload.bytes
+        }
+
+        fn get_overflow(&self) -> u32 {
+            self.payload.overflow
+        }
+    }
+
+    fn my_test(c1: Cell<Table, Leaf>, c2: Cell<Index, Leaf>) {
+        c1.get_row_id();
+    }
+}
