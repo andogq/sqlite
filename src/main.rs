@@ -1,22 +1,20 @@
 mod header;
 mod page;
 
-use std::{fs::File, io::Read};
+use std::fs::File;
 
-use header::RawDbHeader;
-use zerocopy::FromBytes;
+use self::{
+    header::RawDbHeader,
+    page::{Pager, storage::readable::ReadableStorage},
+};
 
 const DATABASE: &str = "test.db";
 
-fn read_header(reader: impl Read) -> RawDbHeader {
-    RawDbHeader::read_from_io(reader).unwrap()
-}
-
 fn main() {
-    println!("Hello, world!");
+    let file = File::open(DATABASE).unwrap();
 
-    let mut file = File::open(DATABASE).unwrap();
-    let header = read_header(&mut file);
+    let mut pager = Pager::new(ReadableStorage::new(file)).unwrap();
 
-    dbg!(header);
+    let page = pager.get_page_header(0).unwrap();
+    dbg!(page);
 }

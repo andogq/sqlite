@@ -15,7 +15,7 @@ pub struct ReadableStorage {
     buf: Box<dyn Readable>,
 
     /// Configured page size.
-    page_size: Option<usize>,
+    page_size: Option<u32>,
 
     /// Currently loaded pages.
     pages: BTreeMap<usize, Vec<u8>>,
@@ -31,13 +31,13 @@ impl ReadableStorage {
         }
     }
 
-    fn get_page_size(&self) -> Result<usize, StorageError> {
+    fn get_page_size(&self) -> Result<u32, StorageError> {
         self.page_size.ok_or(StorageError::PageSizeNotConfigured)
     }
 }
 
 impl PageStorage for ReadableStorage {
-    fn set_page_size(&mut self, page_size: usize) {
+    fn set_page_size(&mut self, page_size: u32) {
         self.page_size = Some(page_size);
     }
 
@@ -52,16 +52,16 @@ impl PageStorage for ReadableStorage {
         Ok(buf)
     }
 
-    fn read_page(&mut self, page_id: usize) -> Result<&[u8], StorageError> {
+    fn read_page(&mut self, page_id: u32) -> Result<&[u8], StorageError> {
         let page_size = self.get_page_size()?;
 
-        if let Entry::Vacant(page_entry) = self.pages.entry(page_id) {
+        if let Entry::Vacant(page_entry) = self.pages.entry(page_id as usize) {
             // Seek to the page.
             self.buf
                 .seek(SeekFrom::Start((page_id * page_size) as u64))?;
 
             // Read into a buffer.
-            let mut buf = vec![0; page_size];
+            let mut buf = vec![0; page_size as usize];
             self.buf.read_exact(&mut buf)?;
 
             // Save the buffer.
@@ -71,7 +71,7 @@ impl PageStorage for ReadableStorage {
         // Read the page from the cache since it's guarenteed to exist.
         Ok(self
             .pages
-            .get(&page_id)
+            .get(&(page_id as usize))
             .expect("previously inserted page exists")
             .as_slice())
     }

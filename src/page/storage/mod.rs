@@ -10,10 +10,10 @@ pub trait PageStorage {
     fn read_start(&mut self, n: usize) -> Result<Vec<u8>, StorageError>;
 
     /// Configure storage to use the provided page size.
-    fn set_page_size(&mut self, page_size: usize);
+    fn set_page_size(&mut self, page_size: u32);
 
     /// Read the given page from the storage.
-    fn read_page(&mut self, page_id: usize) -> Result<&[u8], StorageError>;
+    fn read_page(&mut self, page_id: u32) -> Result<&[u8], StorageError>;
 }
 
 #[derive(Debug, Error)]
