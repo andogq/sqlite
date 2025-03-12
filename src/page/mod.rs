@@ -200,40 +200,23 @@ impl PageType {
 }
 
 mod page2 {
-    use std::{marker::PhantomData, num::NonZero};
+    //! Within SQLite, the b-tree pages (loosely) have two attributes: [`PageType`] and
+    //! [`PageFamily`]. Any combination of these attributes are possible, however will result in
+    //! different data and behaviour in the node. For a given b-tree, all [`Page`]s within the
+    //! b-tree will have the same attributes, as will all [`Cell`]s.
+    //!
+    //! [`PageType`] refers to the function of the page. [`Index`] pages will contain a key of some
+    //! arbitrary length. [`Table`] pages include a variable length key, and an additional payload
+    //! for each key.
+    //!
+    //! [`PageFamily`] refers to the 'kind' of node in a b-tree. [`Leaf`] nodes do not contain any
+    //! other pointers, whilst [`Interior`] nodes have pointers to other nodes in conjunction to
+    //! their keys.
 
-    trait PageType {
-        type Info;
-    }
+    use std::num::NonZero;
 
-    trait PageFamily {
-        type Info;
-    }
-
-    struct Table {}
-    impl PageType for Table {
-        type Info = ();
-    }
-
-    struct Index {}
-    impl PageType for Index {
-        type Info = ();
-    }
-
-    struct Leaf {}
-    impl PageFamily for Leaf {
-        type Info = ();
-    }
-
-    struct InteriorInfo {
-        right_pointer: u32,
-    }
-
-    struct Interior {}
-    impl PageFamily for Interior {
-        type Info = InteriorInfo;
-    }
-
+    /// B-tree page, which will contain keys, and potentially associated data in the case of
+    /// [`Table`] pages. [`Interior`] pages will include a pointer to other pages.
     struct Page<T: PageType, F: PageFamily> {
         // Common fields for all pages.
         first_freeblock: Option<NonZero<u16>>,
@@ -242,136 +225,229 @@ mod page2 {
         fragmented_bytes: u8,
 
         // Fields unique to page variation.
-        type_info: T::Info,
-        family_info: F::Info,
+        type_info: T::PageData,
+        family_info: F::PageData,
     }
 
-    struct RowCell {
-        // TODO: make varint
-        rowid: u32,
-    }
+    mod raw {
+        use derive_more::Debug;
+        use static_assertions::const_assert_eq;
+        use zerocopy::{FromBytes, big_endian::*};
 
-    struct InteriorCell {
-        left_child: u32,
-    }
+        use super::*;
 
-    struct PayloadCell {
-        // TODO: varint
-        length: u32,
-        bytes: Vec<u8>,
-        overflow: u32,
-    }
+        #[derive(Clone, Debug, FromBytes)]
+        #[repr(C)]
+        struct RawPage<T: PageType, F: PageFamily> {
+            page_type: u8,
+            first_freeblock: U16,
+            cell_count: U16,
+            cell_content_offset: U16,
+            fragmented_bytes: u8,
 
-    mod s {
-        mod private {
-            pub trait Sealed {}
+            type_info: <T::PageData as AsRaw>::Raw,
+            family_info: <F::PageData as AsRaw>::Raw,
         }
 
-        pub trait PickAnswer: private::Sealed {}
-        pub struct Yes;
-        impl private::Sealed for Yes {}
-        impl PickAnswer for Yes {}
-        pub struct No;
-        impl private::Sealed for No {}
-        impl PickAnswer for No {}
-    }
-    use s::{No, PickAnswer, Yes};
-
-    trait CellConfig {
-        type Row: PickAnswer;
-        type Interior: PickAnswer;
-        type Payload: PickAnswer;
+        const_assert_eq!(size_of::<RawPage<Table, Leaf>>(), 8);
+        const_assert_eq!(size_of::<RawPage<Index, Leaf>>(), 8);
+        const_assert_eq!(size_of::<RawPage<Table, Interior>>(), 12);
+        const_assert_eq!(size_of::<RawPage<Index, Interior>>(), 12);
     }
 
-    impl CellConfig for (Table, Leaf) {
-        type Row = Yes;
-        type Interior = No;
-        type Payload = Yes;
+    trait AsRaw {
+        type Raw: Clone + std::fmt::Debug + FromBytes;
     }
 
-    impl CellConfig for (Table, Interior) {
-        type Row = Yes;
-        type Interior = Yes;
-        type Payload = No;
+    impl AsRaw for () {
+        type Raw = ();
     }
 
-    impl CellConfig for (Index, Leaf) {
-        type Row = No;
-        type Interior = No;
-        type Payload = Yes;
-    }
-
-    impl CellConfig for (Index, Interior) {
-        type Row = No;
-        type Interior = Yes;
-        type Payload = Yes;
-    }
-
-    struct Pick<T>(PhantomData<fn() -> T>);
-
-    trait Picker<A: PickAnswer> {
-        type Output;
-    }
-
-    impl<T> Picker<Yes> for Pick<T> {
-        type Output = T;
-    }
-    impl<T> Picker<No> for Pick<T> {
-        type Output = ();
-    }
-
+    /// A piece of data within a [`Page`]. Although there are two attributes, the cell's 'payload'
+    /// is dependent on the combination of the two attributes. See [`Payload`].
     struct Cell<T: PageType, F: PageFamily>
     where
-        (T, F): CellConfig,
-        Pick<RowCell>: Picker<<(T, F) as CellConfig>::Row>,
-        Pick<InteriorCell>: Picker<<(T, F) as CellConfig>::Interior>,
-        Pick<PayloadCell>: Picker<<(T, F) as CellConfig>::Payload>,
+        (T, F): Payload,
     {
-        row: <Pick<RowCell> as Picker<<(T, F) as CellConfig>::Row>>::Output,
-        interior: <Pick<InteriorCell> as Picker<<(T, F) as CellConfig>::Interior>>::Output,
-        payload: <Pick<PayloadCell> as Picker<<(T, F) as CellConfig>::Payload>>::Output,
+        type_data: T::CellData,
+        family_data: F::CellData,
+        payload_data: <(T, F) as Payload>::Data,
     }
 
-    impl<T: PageType, F: PageFamily> Cell<T, F>
-    where
-        (T, F): CellConfig<Row = Yes>,
-        Pick<InteriorCell>: Picker<<(T, F) as CellConfig>::Interior>,
-        Pick<PayloadCell>: Picker<<(T, F) as CellConfig>::Payload>,
-    {
-        fn get_row_id(&self) -> u32 {
-            self.row.rowid
+    mod page_type {
+        use derive_more::Debug;
+
+        use super::*;
+
+        /// Marker trait for different 'types' of pages. Type corresponds to the purpose of the page,
+        /// such as [`Table`] or [`Index`].
+        pub trait PageType {
+            /// Data required for [`Page`]s of this type.
+            type PageData: AsRaw;
+
+            /// Data contained in [`Cell`]s originating from [`Page`]s of this type.
+            type CellData: AsRaw;
+        }
+
+        /// Each entry in a table has a 64 bit key, and arbitrary data.
+        pub enum Table {}
+        impl PageType for Table {
+            type PageData = ();
+            type CellData = TableCellData;
+        }
+
+        pub struct TableCellData {
+            // TODO: make varint
+            rowid: u32,
+        }
+
+        #[derive(Clone, Debug, FromBytes)]
+        #[repr(C)]
+        pub struct RawTableCellData {
+            // TODO: Varint
+            rowid: zerocopy::big_endian::U32,
+        }
+
+        impl AsRaw for TableCellData {
+            type Raw = RawTableCellData;
+        }
+
+        impl<F: PageFamily> Cell<Table, F>
+        where
+            (Table, F): Payload,
+        {
+            pub fn get_row_id(&self) -> u32 {
+                self.type_data.rowid
+            }
+        }
+
+        /// Each entry contains an arbitrarily long key.
+        pub enum Index {}
+        impl PageType for Index {
+            type PageData = ();
+            type CellData = ();
         }
     }
+    use page_type::*;
 
-    impl<T: PageType, F: PageFamily> Cell<T, F>
-    where
-        (T, F): CellConfig<Interior = Yes>,
-        Pick<RowCell>: Picker<<(T, F) as CellConfig>::Row>,
-        Pick<PayloadCell>: Picker<<(T, F) as CellConfig>::Payload>,
-    {
-        fn get_left_child(&self) -> u32 {
-            self.interior.left_child
+    mod page_family {
+        use derive_more::Debug;
+
+        use super::*;
+
+        /// Marker trait for different 'families' of pages. The family indicates the relation to other
+        /// [`Page`]s in the B-Tree, such as [`Leaf`] if it has no descendants, or [`Interior`] if it
+        /// does.
+        pub trait PageFamily {
+            /// Data required for [`Page`]s of this family.
+            type PageData: AsRaw;
+
+            /// Data contained in [`Cell`]s originating from [`Page`]s of this family.
+            type CellData: AsRaw;
+        }
+
+        /// A leaf [`Page`] has no pointers to other pages, however it's [`Cell`]s hold keys and/or content
+        /// for [`Table`]s and [`Index`]es.
+        pub enum Leaf {}
+        impl PageFamily for Leaf {
+            type PageData = ();
+            type CellData = ();
+        }
+
+        /// An interior [`Page`] contains keys, and pointers to child [`Page`]s.
+        pub struct Interior {}
+        impl PageFamily for Interior {
+            type PageData = InteriorPageData;
+            type CellData = InteriorCellData;
+        }
+
+        pub struct InteriorPageData {
+            right_pointer: u32,
+        }
+
+        #[derive(Clone, Debug, FromBytes)]
+        #[repr(C)]
+        pub struct RawInteriorPageData {
+            right_pointer: zerocopy::big_endian::U32,
+        }
+
+        impl AsRaw for InteriorPageData {
+            type Raw = RawInteriorPageData;
+        }
+
+        pub struct InteriorCellData {
+            left_child: u32,
+        }
+
+        #[derive(Clone, Debug, FromBytes)]
+        #[repr(C)]
+        pub struct RawInteriorCellData {
+            left_child: zerocopy::big_endian::U32,
+        }
+
+        impl AsRaw for InteriorCellData {
+            type Raw = RawInteriorCellData;
+        }
+
+        impl<T: PageType> Cell<T, Interior>
+        where
+            (T, Interior): Payload,
+        {
+            pub fn get_left_child(&self) -> u32 {
+                self.family_data.left_child
+            }
         }
     }
+    use page_family::*;
 
-    impl<T: PageType, F: PageFamily> Cell<T, F>
-    where
-        (T, F): CellConfig<Payload = Yes>,
-        Pick<RowCell>: Picker<<(T, F) as CellConfig>::Row>,
-        Pick<InteriorCell>: Picker<<(T, F) as CellConfig>::Interior>,
-    {
-        fn get_length(&self) -> u32 {
-            self.payload.length
+    mod cell_payload {
+        use super::*;
+
+        pub struct PayloadCellData {
+            // TODO: varint
+            length: u32,
+            bytes: Vec<u8>,
+            overflow: u32,
         }
 
-        fn get_bytes(&self) -> &[u8] {
-            &self.payload.bytes
+        /// The type of the payload differs depending on [`PageType`] and [`PageFamily`]. This
+        /// trait is to be implemented for any combination of the two attributes.
+        pub trait Payload {
+            /// The type of the data for an attribute combination.
+            type Data;
+        }
+        impl Payload for (Table, Leaf) {
+            type Data = PayloadCellData;
+        }
+        impl Payload for (Table, Interior) {
+            type Data = ();
+        }
+        impl Payload for (Index, Leaf) {
+            type Data = PayloadCellData;
+        }
+        impl Payload for (Index, Interior) {
+            type Data = PayloadCellData;
         }
 
-        fn get_overflow(&self) -> u32 {
-            self.payload.overflow
+        impl<T: PageType, F: PageFamily> Cell<T, F>
+        where
+            (T, F): Payload<Data = PayloadCellData>,
+        {
+            pub fn get_length(&self) -> u32 {
+                self.payload_data.length
+            }
+
+            pub fn get_bytes(&self) -> &[u8] {
+                &self.payload_data.bytes
+            }
+
+            pub fn get_overflow(&self) -> u32 {
+                self.payload_data.overflow
+            }
         }
     }
+    use cell_payload::*;
+    use zerocopy::FromBytes;
 
     fn my_test(c1: Cell<Table, Leaf>, c2: Cell<Index, Leaf>) {
         c1.get_row_id();
