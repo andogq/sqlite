@@ -3,16 +3,14 @@ pub mod storage;
 use std::num::NonZero;
 
 use anyhow::Error;
+use cuisiner::{Cuisiner, CuisinerError};
 use derive_more::{Deref, TryFrom};
 use static_assertions::const_assert_eq;
 use thiserror::Error;
-use zerocopy::{FromBytes, big_endian::*};
+use zerocopy::{BigEndian, FromBytes, big_endian::*};
 
 use self::storage::{PageStorage, StorageError};
-use crate::{
-    RawDbHeader,
-    header::{DbHeader, DbHeaderError, RAW_HEADER_SIZE},
-};
+use crate::header::{SQLITE_HEADER_SIZE, SqliteHeader};
 
 #[derive(Debug, Error)]
 pub enum PagerError {
@@ -20,27 +18,24 @@ pub enum PagerError {
     Storage(#[from] StorageError),
 
     #[error(transparent)]
-    DbHeader(#[from] DbHeaderError),
+    PageHeader(#[from] PageHeaderError),
 
     #[error(transparent)]
-    PageHeader(#[from] PageHeaderError),
+    Cuisiner(#[from] CuisinerError),
 }
 
 pub struct Pager {
     storage: Box<dyn PageStorage>,
 
-    header: DbHeader,
+    header: SqliteHeader,
 }
 
 impl Pager {
     pub fn new(mut storage: impl 'static + PageStorage) -> Result<Self, PagerError> {
-        let header_bytes = storage.read_start(RAW_HEADER_SIZE)?;
-        let header: DbHeader = RawDbHeader::read_from_prefix(&header_bytes)
-            .map(|(header, _)| header)
-            .expect("header_bytes correct size for RawDbHeader")
-            .try_into()?;
+        let header_bytes = storage.read_start(SQLITE_HEADER_SIZE)?;
+        let header = SqliteHeader::from_bytes::<BigEndian>(&header_bytes)?;
 
-        storage.set_page_size(*header.page_size as u32);
+        storage.set_page_size(*header.page_size);
 
         Ok(Self {
             storage: Box::new(storage),
@@ -54,7 +49,7 @@ impl Pager {
         if page_id == 0 {
             // Since the database header resides in the first page, offset if loading the first
             // page.
-            page = &page[RAW_HEADER_SIZE..];
+            page = &page[SQLITE_HEADER_SIZE..];
         }
 
         Ok(PageHeader::try_read(page)?)
@@ -213,7 +208,7 @@ mod page2 {
     //! other pointers, whilst [`Interior`] nodes have pointers to other nodes in conjunction to
     //! their keys.
 
-    use std::num::NonZero;
+    use std::{marker::PhantomData, num::NonZero};
 
     /// B-tree page, which will contain keys, and potentially associated data in the case of
     /// [`Table`] pages. [`Interior`] pages will include a pointer to other pages.
@@ -229,24 +224,40 @@ mod page2 {
         family_info: F::PageData,
     }
 
+    impl<T: PageType, F: PageFamily> AsRaw for Page<T, F> {
+        type Raw = raw::RawPage<T, F>;
+
+        fn try_from_raw(raw: Self::Raw) -> Self {
+            Self {
+                first_freeblock: <_ as AsRaw>::try_from_raw(raw.first_freeblock),
+                cell_count: <_ as AsRaw>::try_from_raw(raw.cell_count),
+                cell_content_offset: <_ as AsRaw>::try_from_raw(raw.cell_content_offset),
+                fragmented_bytes: <_ as AsRaw>::try_from_raw(raw.fragmented_bytes),
+                type_info: <_ as AsRaw>::try_from_raw(raw.type_info),
+                family_info: <_ as AsRaw>::try_from_raw(raw.family_info),
+            }
+        }
+    }
+
     mod raw {
-        use derive_more::Debug;
+        use derive_where::derive_where;
         use static_assertions::const_assert_eq;
         use zerocopy::{FromBytes, big_endian::*};
 
         use super::*;
 
-        #[derive(Clone, Debug, FromBytes)]
+        #[derive(FromBytes)]
+        #[derive_where(Clone, Debug)]
         #[repr(C)]
-        struct RawPage<T: PageType, F: PageFamily> {
-            page_type: u8,
-            first_freeblock: U16,
-            cell_count: U16,
-            cell_content_offset: U16,
-            fragmented_bytes: u8,
+        pub struct RawPage<T: PageType, F: PageFamily> {
+            pub page_type: u8,
+            pub first_freeblock: U16,
+            pub cell_count: U16,
+            pub cell_content_offset: U16,
+            pub fragmented_bytes: u8,
 
-            type_info: <T::PageData as AsRaw>::Raw,
-            family_info: <F::PageData as AsRaw>::Raw,
+            pub type_info: <T::PageData as AsRaw>::Raw,
+            pub family_info: <F::PageData as AsRaw>::Raw,
         }
 
         const_assert_eq!(size_of::<RawPage<Table, Leaf>>(), 8);
@@ -257,11 +268,78 @@ mod page2 {
 
     trait AsRaw {
         type Raw: Clone + std::fmt::Debug + FromBytes;
+
+        fn try_from_raw(raw: Self::Raw) -> Self;
     }
 
     impl AsRaw for () {
         type Raw = ();
+
+        fn try_from_raw(raw: Self::Raw) -> Self {
+            raw
+        }
     }
+
+    macro_rules! raw_number {
+        ($ty:ty: $raw:ty) => {
+            raw_number!($ty: $raw => |n| n.get());
+        };
+
+        ($ty:ty: $raw:ty => |$i:ident| $convert:expr) => {
+            impl AsRaw for $ty {
+                type Raw = $raw;
+
+                fn try_from_raw($i: Self::Raw) -> Self {
+                    $convert
+                }
+            }
+
+            impl AsRaw for Option<NonZero<$ty>> {
+                type Raw = $raw;
+
+                fn try_from_raw(raw: Self::Raw) -> Self {
+                    let n = <$ty as AsRaw>::try_from_raw(raw);
+                    NonZero::try_from(n).ok()
+                }
+            }
+
+            impl AsRaw for NonZero<$ty> {
+                type Raw = $raw;
+
+                fn try_from_raw(raw: Self::Raw) -> Self {
+                    <Option<NonZero<$ty>> as AsRaw>::try_from_raw(raw).unwrap()
+                }
+            }
+        };
+    }
+
+    raw_number!(u8: u8 => |n| n);
+    raw_number!(u16: zerocopy::big_endian::U16);
+    raw_number!(u32: zerocopy::big_endian::U32);
+    raw_number!(u64: zerocopy::big_endian::U64);
+    raw_number!(u128: zerocopy::big_endian::U128);
+
+    struct PageFlag<T: PageType, F: PageFamily>(PhantomData<fn() -> (T, F)>);
+
+    macro_rules! impl_page_flag {
+        (($ty:ident, $fam:ident) = $flag:expr) => {
+            impl AsRaw for PageFlag<$ty, $fam> {
+                type Raw = u8;
+
+                fn try_from_raw(raw: Self::Raw) -> Self {
+                    if raw != $flag {
+                        panic!("unvalid flag {raw}");
+                    }
+
+                    Self(PhantomData::default())
+                }
+            }
+        };
+    }
+    impl_page_flag!((Index, Interior) = 0x02);
+    impl_page_flag!((Index, Leaf) = 0x05);
+    impl_page_flag!((Table, Interior) = 0x0a);
+    impl_page_flag!((Table, Leaf) = 0x0d);
 
     /// A piece of data within a [`Page`]. Although there are two attributes, the cell's 'payload'
     /// is dependent on the combination of the two attributes. See [`Payload`].
@@ -275,8 +353,6 @@ mod page2 {
     }
 
     mod page_type {
-        use derive_more::Debug;
-
         use super::*;
 
         /// Marker trait for different 'types' of pages. Type corresponds to the purpose of the page,
@@ -310,6 +386,10 @@ mod page2 {
 
         impl AsRaw for TableCellData {
             type Raw = RawTableCellData;
+
+            fn try_from_raw(raw: Self::Raw) -> Self {
+                todo!()
+            }
         }
 
         impl<F: PageFamily> Cell<Table, F>
@@ -331,8 +411,6 @@ mod page2 {
     use page_type::*;
 
     mod page_family {
-        use derive_more::Debug;
-
         use super::*;
 
         /// Marker trait for different 'families' of pages. The family indicates the relation to other
@@ -373,6 +451,10 @@ mod page2 {
 
         impl AsRaw for InteriorPageData {
             type Raw = RawInteriorPageData;
+
+            fn try_from_raw(raw: Self::Raw) -> Self {
+                todo!()
+            }
         }
 
         pub struct InteriorCellData {
@@ -387,6 +469,10 @@ mod page2 {
 
         impl AsRaw for InteriorCellData {
             type Raw = RawInteriorCellData;
+
+            fn try_from_raw(raw: Self::Raw) -> Self {
+                todo!()
+            }
         }
 
         impl<T: PageType> Cell<T, Interior>

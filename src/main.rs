@@ -3,10 +3,7 @@ mod page;
 
 use std::fs::File;
 
-use self::{
-    header::RawDbHeader,
-    page::{Pager, storage::readable::ReadableStorage},
-};
+use self::page::{Pager, storage::readable::ReadableStorage};
 
 const DATABASE: &str = "test.db";
 

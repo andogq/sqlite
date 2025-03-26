@@ -1,154 +1,183 @@
-mod page_size;
-mod raw;
+use std::num::NonZero;
 
-use anyhow::Error;
-use derive_more::TryFrom;
-use thiserror::Error;
+use cuisiner::{ByteBoolean, ByteOrder, ConstU8, Cuisiner, CuisinerError, Reserved};
+use derive_more::Deref;
+use zerocopy::{U16, U32};
 
-pub use self::{
-    page_size::PageSize,
-    raw::{RAW_HEADER_SIZE, RawDbHeader},
-};
+/// Expected size of the SQLite header in bytes.
+pub const SQLITE_HEADER_SIZE: usize = 100;
 
 /// Header of a SQLite file.
-///
-/// This is the fully parsed and validated version of the header. See [`RawDbHeader`] for the disk
-/// representation of the header.
-#[allow(unused)]
-#[derive(Clone, Debug)]
-pub struct DbHeader {
+#[derive(Clone, Cuisiner, Debug)]
+#[cuisiner(assert_size = SQLITE_HEADER_SIZE)]
+pub struct SqliteHeader {
+    /// The header string.
+    #[cuisiner(offset = 0, size = 16)]
+    pub header_string: HeaderString,
     /// Size of each page.
+    #[cuisiner(offset = 16, size = 2)]
     pub page_size: PageSize,
     /// File format write version.
+    #[cuisiner(offset = 18, size = 1)]
     pub file_format_write_version: FileFormatVersion,
     /// File format read version.
+    #[cuisiner(offset = 19, size = 1)]
     pub file_format_read_version: FileFormatVersion,
     /// Number of bytes for reserved space at the end of each page.
-    pub reserved_padding: u8,
+    #[cuisiner(offset = 20, size = 1)]
+    pub page_end_padding: Option<NonZero<u8>>,
+    /// Maximum embedded payload fraction.
+    #[cuisiner(offset = 21, size = 1)]
+    pub max_payload_fraction: ConstU8<64>,
+    /// Minimum embedded payload fraction.
+    #[cuisiner(offset = 22, size = 1)]
+    pub min_payload_fraction: ConstU8<32>,
+    /// Leaf payload fraction.
+    #[cuisiner(offset = 23, size = 1)]
+    pub leaf_payload_fraction: ConstU8<32>,
     /// File change counter.
+    #[cuisiner(offset = 24, size = 4)]
     pub file_change_counter: u32,
-    /// The size of the database file in pages.
-    pub database_page_count: u32,
-    // Page number of the first freelist trunk page.
-    pub first_freelist_trunk_page: u32,
+    /// Number of pages in the database.
+    #[cuisiner(offset = 28, size = 4)]
+    pub page_count: u32,
+    /// Page number of the first freelist trunk page.
+    #[cuisiner(offset = 32, size = 4)]
+    pub freelist_trunk_page: u32,
     /// Total number of freelist pages.
-    pub freelist_trunk_page_count: u32,
-    /// The schema cookie.
+    #[cuisiner(offset = 36, size = 4)]
+    pub freelist_page_count: u32,
+    /// Schema cookie.
+    #[cuisiner(offset = 40, size = 4)]
     pub schema_cookie: u32,
-    /// THe schema format number.
-    pub schema_format_number: u32,
+    /// Schema format number.
+    #[cuisiner(offset = 44, size = 4)]
+    pub schema_format: SchemaFormat,
     /// Default page cache size.
+    #[cuisiner(offset = 48, size = 4)]
     pub default_page_cache_size: u32,
-    /// The page number of the largest b-tree page when in auto-vacuum or incremental-vacuum mode,
-    /// or zero otherwise.
-    pub largest_root_btree_page: u32,
-    /// The database text encoding.
-    pub database_text_encoding: u32,
-    /// The user version as set by the `user_version` pragma.
+    /// Page number of the largest root b-tree page. Will be [`None`] if not in auto-vacuum or
+    /// incremental-vacuum modes.
+    #[cuisiner(offset = 52, size = 4)]
+    pub largest_root_btree_page: Option<NonZero<u32>>,
+    /// Text encoding.
+    #[cuisiner(offset = 56, size = 4)]
+    pub text_encoding: TextEncoding,
+    /// User version as per `user_version_pragma`.
+    #[cuisiner(offset = 60, size = 4)]
     pub user_version: u32,
-    /// True (non-zero) for incremental-vacuum mode. False (zero) otherwise.
-    pub incremental_vacuum_mode: bool,
-    /// The application ID set by `application_id` pragma.
+    /// `true` for incremental-vacuum mode.
+    #[cuisiner(offset = 64, size = 4)]
+    pub incremental_vacuum_mode: ByteBoolean<4>,
+    /// Application ID as per `PRAGMA application_id`.
+    #[cuisiner(offset = 68, size = 4)]
     pub application_id: u32,
-    /// The `version-valid-for` number.
+    /// Reserved for expansion.
+    #[cuisiner(offset = 72, size = 20)]
+    _reserved: Reserved<20>,
+    /// `version-valid-for` number.
+    #[cuisiner(offset = 92, size = 4)]
     pub version_valid_for: u32,
-    /// `SQLITE_VERSION_NUMBER`.
-    pub sqlite_version: SqliteVersionNumber,
+    /// SQLite version number.
+    #[cuisiner(offset = 96, size = 4)]
+    pub sqlite_version_number: SqliteVersionNumber,
 }
 
-#[derive(Debug, Error)]
-pub enum DbHeaderError {
-    #[error("invalid header string (expected {HEADER_STRING}, found {0})")]
-    InvalidHeaderString(String),
-
-    #[error("header[72:91] must all be zero")]
-    ReservedNotZero,
-
-    #[error(transparent)]
-    Other(#[from] Error),
+#[derive(Clone, Debug)]
+pub struct HeaderString;
+impl HeaderString {
+    const BYTES: [u8; 16] = *b"SQLite format 3\0";
 }
+impl Cuisiner for HeaderString {
+    type Raw<B: ByteOrder> = [u8; 16];
 
-/// Header string found in the documentation.
-const HEADER_STRING: &str = "SQLite format 3\0";
-
-impl TryFrom<RawDbHeader> for DbHeader {
-    type Error = DbHeaderError;
-
-    fn try_from(header: RawDbHeader) -> Result<Self, Self::Error> {
-        // Validate the header string of the file.
-        let header_string = String::from_utf8_lossy(&header.header_string);
-        if header_string != HEADER_STRING {
-            return Err(DbHeaderError::InvalidHeaderString(header_string.into()));
+    fn try_from_raw<B: ByteOrder>(raw: Self::Raw<B>) -> Result<Self, CuisinerError> {
+        if raw != Self::BYTES {
+            return Err(CuisinerError::Validation(format!(
+                "invalid header string: {raw:?}"
+            )));
         }
 
-        if !header.reserved.into_iter().all(|b| b == 0b00) {
-            return Err(DbHeaderError::ReservedNotZero);
-        }
+        Ok(Self)
+    }
 
-        Ok(Self {
-            page_size: header.page_size.get().try_into().map_err(Error::from)?,
-            file_format_write_version: header
-                .file_format_write_version
-                .try_into()
-                .map_err(Error::from)?,
-            file_format_read_version: header
-                .file_format_write_version
-                .try_into()
-                .map_err(Error::from)?,
-            reserved_padding: header.reserved_padding,
-            file_change_counter: header.file_change_counter.get(),
-            database_page_count: header.database_page_count.get(),
-            first_freelist_trunk_page: header.first_freelist_trunk_page.get(),
-            freelist_trunk_page_count: header.freelist_trunk_page_count.get(),
-            schema_cookie: header.schema_cookie.get(),
-            schema_format_number: header.schema_format_number.get(),
-            default_page_cache_size: header.default_page_cache_size.get(),
-            largest_root_btree_page: header.largest_root_btree_page.get(),
-            database_text_encoding: header.database_text_encoding.get(),
-            user_version: header.user_version.get(),
-            // True if the value isn't zero.
-            incremental_vacuum_mode: header.incremental_vacuum_mode.get() != 0,
-            application_id: header.application_id.get(),
-            version_valid_for: header.version_valid_for.get(),
-            sqlite_version: header.sqlite_version.get().into(),
-        })
+    fn try_to_raw<B: ByteOrder>(self) -> Result<Self::Raw<B>, CuisinerError> {
+        Ok(Self::BYTES)
     }
 }
 
-/// Version of the file.
-#[derive(Clone, Copy, Debug, TryFrom)]
-#[try_from(repr)]
-#[repr(u8)]
+#[derive(Clone, Debug, Deref)]
+pub struct PageSize(u32);
+impl PageSize {
+    /// Minumum value of page size.
+    const MIN: u32 = 512;
+    /// Maximum encoded page size.
+    const MAX: u32 = 32768;
+    /// Page size of `1` encoded.
+    const VALUE_FOR_1: u32 = 65536;
+}
+impl Cuisiner for PageSize {
+    type Raw<B: ByteOrder> = U16<B>;
+
+    fn try_from_raw<B: ByteOrder>(raw: Self::Raw<B>) -> Result<Self, CuisinerError> {
+        Ok(Self(match raw.get() as u32 {
+            1 => Self::VALUE_FOR_1,
+            n @ Self::MIN..=Self::MAX if n.is_power_of_two() => n,
+            n => {
+                return Err(CuisinerError::Validation(format!(
+                    "page size must be a power of 2 between {min} and {max} (found {n})",
+                    min = Self::MIN,
+                    max = Self::MAX
+                )));
+            }
+        }))
+    }
+
+    fn try_to_raw<B: ByteOrder>(self) -> Result<Self::Raw<B>, CuisinerError> {
+        Ok(U16::new(match self.0 {
+            Self::VALUE_FOR_1 => 1,
+            n @ Self::MIN..=Self::MAX => n as u16,
+            n => {
+                return Err(CuisinerError::Validation(format!(
+                    "page size must be a power of 2 between {min} and {max} (found {n})",
+                    min = Self::MIN,
+                    max = Self::MAX,
+                )));
+            }
+        }))
+    }
+}
+
+#[derive(Clone, Cuisiner, Debug)]
+#[cuisiner(repr = u8)]
 pub enum FileFormatVersion {
     Legacy = 1,
     Wal = 2,
 }
 
-#[derive(Clone, Copy, Debug, TryFrom)]
-pub enum SchemaFormatNumber {
+#[derive(Clone, Cuisiner, Debug)]
+#[cuisiner(repr = u32)]
+pub enum SchemaFormat {
     V1 = 1,
     V2 = 2,
     V3 = 3,
     V4 = 4,
 }
 
-#[derive(Clone, Copy, Debug, TryFrom)]
+#[derive(Clone, Cuisiner, Debug)]
+#[cuisiner(repr = u32)]
 pub enum TextEncoding {
     Utf8 = 1,
     Utf16Le = 2,
     Utf16Be = 3,
 }
 
-/// Version of SQLite in semver.
-///
-/// See [SQLite Documentation](https://www.sqlite.org/c3ref/c_source_id.html).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct SqliteVersionNumber {
-    pub major: u16,
-    pub minor: u16,
-    pub patch: u16,
+    major: u16,
+    minor: u16,
+    patch: u16,
 }
-
 impl From<u32> for SqliteVersionNumber {
     fn from(value: u32) -> Self {
         Self {
@@ -156,6 +185,22 @@ impl From<u32> for SqliteVersionNumber {
             minor: (value % 1_000_000 / 1_000) as u16,
             patch: (value % 1_000) as u16,
         }
+    }
+}
+impl From<SqliteVersionNumber> for u32 {
+    fn from(version: SqliteVersionNumber) -> Self {
+        version.major as u32 * 1_000_000 + version.minor as u32 * 1_000 + version.patch as u32
+    }
+}
+impl Cuisiner for SqliteVersionNumber {
+    type Raw<B: ByteOrder> = U32<B>;
+
+    fn try_from_raw<B: ByteOrder>(raw: Self::Raw<B>) -> Result<Self, CuisinerError> {
+        Ok(Self::from(raw.get()))
+    }
+
+    fn try_to_raw<B: ByteOrder>(self) -> Result<Self::Raw<B>, CuisinerError> {
+        Ok(U32::new(self.into()))
     }
 }
 
