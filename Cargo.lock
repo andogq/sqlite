@@ -18,6 +18,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
 
 [[package]]
+name = "assert_layout"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a90355884448f2cbc9ded8923c8573f7aeeb59986d6204ece64753b4cfe8c01"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -31,21 +42,21 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cuisiner"
-version = "0.0.2"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b60eb8df102d94be46bfb4493a34d1b503d306b23aa962463d539cd8971a2b6"
+checksum = "1d9a8fe6aff89cb97aa28e8bcd2d7339f86906b1eb036604dc160c850a977287"
 dependencies = [
+ "assert_layout",
  "cuisiner_derive",
- "static_assertions",
  "thiserror",
  "zerocopy",
 ]
 
 [[package]]
 name = "cuisiner_derive"
-version = "0.0.2"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74b87810d7ce6ad1fa7deb957b96214923aa491c64de4264c2f7dabcea6c9c06"
+checksum = "de2951e0c25b8725955e67503fcc7a44cb7998ddbbd98c9e26542fcf32433966"
 dependencies = [
  "proc-macro2",
  "quote",

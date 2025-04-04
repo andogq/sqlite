@@ -9,77 +9,77 @@ pub const SQLITE_HEADER_SIZE: usize = 100;
 
 /// Header of a SQLite file.
 #[derive(Clone, Cuisiner, Debug)]
-#[cuisiner(assert_size = SQLITE_HEADER_SIZE)]
+#[cuisiner(assert(size = SQLITE_HEADER_SIZE))]
 pub struct SqliteHeader {
     /// The header string.
-    #[cuisiner(offset = 0, size = 16)]
+    #[cuisiner(assert(offset = 0, size = 16))]
     pub header_string: HeaderString,
     /// Size of each page.
-    #[cuisiner(offset = 16, size = 2)]
+    #[cuisiner(assert(offset = 16, size = 2))]
     pub page_size: PageSize,
     /// File format write version.
-    #[cuisiner(offset = 18, size = 1)]
+    #[cuisiner(assert(offset = 18, size = 1))]
     pub file_format_write_version: FileFormatVersion,
     /// File format read version.
-    #[cuisiner(offset = 19, size = 1)]
+    #[cuisiner(assert(offset = 19, size = 1))]
     pub file_format_read_version: FileFormatVersion,
     /// Number of bytes for reserved space at the end of each page.
-    #[cuisiner(offset = 20, size = 1)]
+    #[cuisiner(assert(offset = 20, size = 1))]
     pub page_end_padding: Option<NonZero<u8>>,
     /// Maximum embedded payload fraction.
-    #[cuisiner(offset = 21, size = 1)]
+    #[cuisiner(assert(offset = 21, size = 1))]
     pub max_payload_fraction: ConstU8<64>,
     /// Minimum embedded payload fraction.
-    #[cuisiner(offset = 22, size = 1)]
+    #[cuisiner(assert(offset = 22, size = 1))]
     pub min_payload_fraction: ConstU8<32>,
     /// Leaf payload fraction.
-    #[cuisiner(offset = 23, size = 1)]
+    #[cuisiner(assert(offset = 23, size = 1))]
     pub leaf_payload_fraction: ConstU8<32>,
     /// File change counter.
-    #[cuisiner(offset = 24, size = 4)]
+    #[cuisiner(assert(offset = 24, size = 4))]
     pub file_change_counter: u32,
     /// Number of pages in the database.
-    #[cuisiner(offset = 28, size = 4)]
+    #[cuisiner(assert(offset = 28, size = 4))]
     pub page_count: u32,
     /// Page number of the first freelist trunk page.
-    #[cuisiner(offset = 32, size = 4)]
+    #[cuisiner(assert(offset = 32, size = 4))]
     pub freelist_trunk_page: u32,
     /// Total number of freelist pages.
-    #[cuisiner(offset = 36, size = 4)]
+    #[cuisiner(assert(offset = 36, size = 4))]
     pub freelist_page_count: u32,
     /// Schema cookie.
-    #[cuisiner(offset = 40, size = 4)]
+    #[cuisiner(assert(offset = 40, size = 4))]
     pub schema_cookie: u32,
     /// Schema format number.
-    #[cuisiner(offset = 44, size = 4)]
+    #[cuisiner(assert(offset = 44, size = 4))]
     pub schema_format: SchemaFormat,
     /// Default page cache size.
-    #[cuisiner(offset = 48, size = 4)]
+    #[cuisiner(assert(offset = 48, size = 4))]
     pub default_page_cache_size: u32,
     /// Page number of the largest root b-tree page. Will be [`None`] if not in auto-vacuum or
     /// incremental-vacuum modes.
-    #[cuisiner(offset = 52, size = 4)]
+    #[cuisiner(assert(offset = 52, size = 4))]
     pub largest_root_btree_page: Option<NonZero<u32>>,
     /// Text encoding.
-    #[cuisiner(offset = 56, size = 4)]
+    #[cuisiner(assert(offset = 56, size = 4))]
     pub text_encoding: TextEncoding,
     /// User version as per `user_version_pragma`.
-    #[cuisiner(offset = 60, size = 4)]
+    #[cuisiner(assert(offset = 60, size = 4))]
     pub user_version: u32,
     /// `true` for incremental-vacuum mode.
-    #[cuisiner(offset = 64, size = 4)]
+    #[cuisiner(assert(offset = 64, size = 4))]
     pub incremental_vacuum_mode: ByteBoolean<4>,
     /// Application ID as per `PRAGMA application_id`.
-    #[cuisiner(offset = 68, size = 4)]
+    #[cuisiner(assert(offset = 68, size = 4))]
     pub application_id: u32,
     /// Reserved for expansion.
-    #[cuisiner(offset = 72, size = 20)]
+    #[cuisiner(assert(offset = 72, size = 20))]
     _reserved: Reserved<20>,
     /// `version-valid-for` number.
-    #[cuisiner(offset = 92, size = 4)]
+    #[cuisiner(assert(offset = 92, size = 4))]
     pub version_valid_for: u32,
     /// SQLite version number.
-    #[cuisiner(offset = 96, size = 4)]
+    #[cuisiner(assert(offset = 96, size = 4))]
     pub sqlite_version_number: SqliteVersionNumber,
 }
 
