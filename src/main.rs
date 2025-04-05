@@ -1,5 +1,6 @@
 mod header;
 mod page;
+mod varint;
 
 use std::fs::File;
 
