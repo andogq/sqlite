@@ -1,19 +1,19 @@
-use cuisiner::Cuisiner;
+use std::fmt::Debug;
 
-use crate::page::cell::TableCellData;
+use crate::structures::page::cell::TableCellData;
 
 /// Marker trait for different 'types' of pages. Type corresponds to the purpose of the page,
 /// such as [`Table`] or [`Index`].
 pub trait PageType {
     /// Data required for [`Page`]s of this type.
-    type PageData: Cuisiner;
+    type PageData: Debug;
 
     /// Data contained in [`Cell`]s originating from [`Page`]s of this type.
-    type CellData: Cuisiner;
+    type CellData: Debug;
 }
 
 /// Each entry in a table has a 64 bit key, and arbitrary data.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Table {}
 impl PageType for Table {
     type PageData = ();
@@ -21,7 +21,7 @@ impl PageType for Table {
 }
 
 /// Each entry contains an arbitrarily long key.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Index {}
 impl PageType for Index {
     type PageData = ();

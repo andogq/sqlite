@@ -1,5 +1,3 @@
-use cuisiner::Cuisiner;
-
 use super::{Index, Interior, Leaf, PageFamily, PageType, Table};
 
 /// A piece of data within a [`Page`]. Although there are two attributes, the cell's 'payload'
@@ -13,7 +11,7 @@ where
     payload_data: <(T, F) as Payload>::Data,
 }
 
-#[derive(Cuisiner)]
+#[derive(Debug)]
 pub struct TableCellData {
     // TODO: make varint
     rowid: u32,
@@ -28,7 +26,7 @@ where
     }
 }
 
-#[derive(Cuisiner)]
+#[derive(Clone, Debug)]
 pub struct InteriorCellData {
     left_child: u32,
 }

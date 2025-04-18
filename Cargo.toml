@@ -5,9 +5,11 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.97"
+assert_layout = "0.0.1"
 cuisiner = { version = "0.0.6" }
 derive-where = "1.2.7"
 derive_more = { version = "2.0.1", features = ["deref", "try_from"] }
+num_enum = "0.7.3"
 static_assertions = "1.1.0"
 thiserror = "2.0.12"
 zerocopy = { version = "0.8.21", features = ["std", "derive"] }

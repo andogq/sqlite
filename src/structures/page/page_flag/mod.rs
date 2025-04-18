@@ -3,14 +3,13 @@ mod page_type;
 
 use std::fmt::Debug;
 
-use cuisiner::{ConstU8, Cuisiner};
-
 pub use self::{page_family::*, page_type::*};
+use crate::structures::util::ConstU8;
 
 /// Trait to contain the page flag value for a given [`PageType`] and [`PageFamily`]
 /// combination.
 pub trait PageFlag {
-    type Value: Cuisiner + Debug + PartialEq + Eq;
+    type Value: Clone + Copy + Debug + PartialEq + Eq;
 }
 
 impl PageFlag for (Index, Interior) {
