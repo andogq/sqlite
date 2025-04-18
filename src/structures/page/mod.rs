@@ -24,8 +24,6 @@ use self::page_flag::*;
 
 pub use self::page_flag::{Index, Interior, Leaf, Table};
 
-use super::util::Optional;
-
 /// B-tree page, which will contain keys, and potentially associated data in the case of
 /// [`Table`] pages. [`Interior`] pages will include a pointer to other pages.
 #[derive(Clone, Debug, PartialEq, Eq, FromBytes, KnownLayout, Immutable)]
@@ -48,7 +46,7 @@ where
 
     // Common fields for all pages.
     #[assert_layout(offset = 1, size = 2)]
-    first_freeblock: Optional<U16>,
+    first_freeblock: U16,
     #[assert_layout(offset = 3, size = 2)]
     cell_count: U16,
     #[assert_layout(offset = 5, size = 2)]

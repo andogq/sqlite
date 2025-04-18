@@ -9,7 +9,6 @@ use std::{
 
 use disk::{PageId, Pager, SomePager};
 use structures::{
-    GetValid,
     header::{SQLITE_HEADER_SIZE, SqliteHeader},
     page::AnyPage,
 };
@@ -46,8 +45,8 @@ fn bootstrap<'source>(
 ) -> Result<Box<dyn 'source + SomePager>, std::io::Error> {
     let mut pager = Pager::new(source, SQLITE_HEADER_SIZE, 16);
 
-    let header = SqliteHeader::try_read(pager.get(PageId(0))?.unwrap()).unwrap();
-    let page_size = header.page_size.get();
+    let header = SqliteHeader::read_from_buffer(pager.get(PageId(0))?.unwrap()).unwrap();
+    let page_size = header.page_size();
 
     // Update the pager.
     pager.update_page_size(page_size as usize);
