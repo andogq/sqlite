@@ -1,4 +1,5 @@
-mod disk;
+mod memory;
+mod pager;
 mod structures;
 mod varint;
 
@@ -7,7 +8,7 @@ use std::{
     io::{Read, Seek},
 };
 
-use disk::{PageId, Pager, SomePager};
+use pager::{PageId, Pager, SomePager};
 use structures::{
     btree::{BTree, BTreeWalker, Table},
     header::{SQLITE_HEADER_SIZE, SqliteHeader},

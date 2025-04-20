@@ -2,12 +2,10 @@ pub mod page;
 
 use std::marker::PhantomData;
 
-use zerocopy::{
-    FromBytes,
-    big_endian::{U16, U32},
+use crate::{
+    memory::*,
+    pager::{PageId, SomePager},
 };
-
-use crate::disk::{PageId, PageSlice, SomePager};
 
 use self::page::*;
 
@@ -65,7 +63,7 @@ impl<'b, K: TreeKind> BTreeWalker<'b, K> {
 }
 
 pub struct CellRef<K: TreeKind> {
-    page: PageSlice,
+    page: MemoryPage,
     page_type: PageType,
     kind: PhantomData<fn() -> K>,
 }

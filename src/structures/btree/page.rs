@@ -7,18 +7,18 @@ use zerocopy::{
     big_endian::{U16, U32},
 };
 
-use crate::disk::{PageBuffer, PageSlice};
+use crate::memory::*;
 
 use super::{Index, PageType, Table, TreeKind};
 
 #[derive(Clone)]
 pub struct Page<K: TreeKind> {
-    pub disk_page: crate::disk::Page,
+    pub disk_page: MemoryPage,
     pub kind: PhantomData<K>,
 }
 
 impl<K: TreeKind> Page<K> {
-    pub fn new(disk_page: crate::disk::Page) -> Self {
+    pub fn new(disk_page: MemoryPage) -> Self {
         Self {
             disk_page,
             kind: PhantomData,
@@ -35,7 +35,7 @@ impl<K: TreeKind> Page<K> {
 
 pub struct PageOperation<'p, 'b, K: TreeKind> {
     page: &'p Page<K>,
-    buf: PageBuffer<'b>,
+    buf: MemoryPageRef<'b>,
 }
 
 impl<'p, 'b, K: TreeKind> PageOperation<'p, 'b, K>
@@ -66,7 +66,7 @@ where
         (header, right_pointer, buf)
     }
 
-    pub fn get_cell_buffer(&self, cell_number: usize) -> PageSlice {
+    pub fn get_cell_buffer(&self, cell_number: usize) -> MemoryPage {
         let (header, _, buf) = self.header();
 
         if cell_number >= header.cell_count.get() as usize {
