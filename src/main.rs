@@ -4,9 +4,11 @@ mod varint;
 
 use std::fs::File;
 
+use structures::btree::cell::Table;
+
 use crate::{
     memory::pager::*,
-    structures::btree::{BTree, BTreeWalker, Table},
+    structures::btree::{BTree, BTreeWalker},
 };
 
 const DATABASE: &str = "test.db";

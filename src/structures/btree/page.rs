@@ -9,7 +9,10 @@ use zerocopy::{
 
 use crate::memory::*;
 
-use super::{Index, PageType, Table, TreeKind};
+use super::{
+    PageType, TreeKind,
+    cell::{Index, Table},
+};
 
 #[derive(Clone)]
 pub struct Page<K: TreeKind> {
@@ -42,183 +45,67 @@ impl<'p, 'b, K: TreeKind> PageOperation<'p, 'b, K>
 where
     'p: 'b,
 {
-    pub fn new(page: &'p Page<K>) -> Self {
+    fn new(page: &'p Page<K>) -> Self {
         Self {
             page,
             buf: page.disk_page.buffer(),
         }
     }
 
-    pub fn header(&self) -> (&PageHeader<K>, Option<u32>, &[u8]) {
+    /// Parse the page header from the buffer.
+    pub fn header(&self) -> &PageHeader<K> {
         // Read out the base of the header.
-        let (header, buf) = PageHeader::<K>::read_from_prefix(&self.buf).unwrap();
+        let (header, _) = PageHeader::<K>::read_from_prefix(&self.buf).unwrap();
 
-        // Optionally read the right pointer.
-        let (right_pointer, buf) = match header.get_page_type() {
+        header
+    }
+
+    /// Fetch the right pointer of the page, if it's present.
+    pub fn get_right_pointer(&self) -> Option<u32> {
+        match self.header().get_page_type() {
             PageType::Interior => {
-                // Fetch the right pointer which is present after the header.
-                let (right_pointer, buf) = U32::ref_from_prefix(buf).unwrap();
-                (Some(right_pointer.get()), buf)
-            }
-            PageType::Leaf => (None, buf),
-        };
+                // Advance buffer beyond page header.
+                let buf = &self.buf[size_of::<PageHeader<K>>()..];
 
-        (header, right_pointer, buf)
+                // Fetch the right pointer.
+                let (right_pointer, _) = U32::ref_from_prefix(buf).unwrap();
+                Some(right_pointer.get())
+            }
+            PageType::Leaf => None,
+        }
+    }
+
+    /// Calculate the slice of the cell pointer array.
+    fn get_cell_pointer_array(&self) -> &[U16] {
+        let header = self.header();
+
+        // Calculate the offset past the page header, and the optional right pointer.
+        let offset = size_of::<PageHeader<K>>()
+            + match header.get_page_type() {
+                PageType::Leaf => 0,
+                PageType::Interior => size_of::<U32>(),
+            };
+        let buf = &self.buf[offset..];
+
+        // Parse out the pointer array.
+        let (cell_pointer_array, _) =
+            <[U16]>::ref_from_prefix_with_elems(buf, header.cell_count.get().into()).unwrap();
+        cell_pointer_array
     }
 
     pub fn get_cell_buffer(&self, cell_number: usize) -> MemoryPage {
-        let (header, _, buf) = self.header();
+        let header = self.header();
 
         if cell_number >= header.cell_count.get() as usize {
             panic!("offset larger than available cells");
         }
 
-        let (cell_pointer_array, _) =
-            <[U16]>::ref_from_prefix_with_elems(buf, header.cell_count.get() as usize).unwrap();
+        let cell_pointer_array = self.get_cell_pointer_array();
 
         // Select the relevant area of the cell content area.
         let offset = cell_pointer_array[cell_number].get() as usize;
 
         self.page.disk_page.slice(offset..)
-    }
-
-    pub fn get_cell(&self, cell_number: usize) -> (Option<u32>, K::Cell<'_>) {
-        let (header, _, buf) = self.header();
-
-        if cell_number >= header.cell_count.get() as usize {
-            panic!("offset larger than available cells");
-        }
-
-        let (cell_pointer_array, _) =
-            <[U16]>::ref_from_prefix_with_elems(buf, header.cell_count.get() as usize).unwrap();
-        let cell_content_area = &self.buf[header.cell_content_offset.get() as usize..];
-
-        // Select the relevant area of the cell content area.
-        let offset = cell_pointer_array[cell_number].get() as usize;
-        let buf = &cell_content_area[offset..];
-
-        let page_type = header.get_page_type();
-
-        let (left_pointer, buf) = match page_type {
-            PageType::Interior => {
-                let (left_pointer, buf) = U32::ref_from_prefix(buf).unwrap();
-                (Some(left_pointer.get()), buf)
-            }
-            PageType::Leaf => (None, buf),
-        };
-
-        let (cell, _) = K::Cell::from_buffer(buf, page_type);
-
-        (left_pointer, cell)
-    }
-}
-
-pub struct TableCell<'p> {
-    /// Row ID.
-    rowid: VarInt,
-    /// Payload of the cell, only present on leaf pages.
-    payload: Option<Payload<'p>>,
-}
-
-impl<'p> PageCell<'p> for TableCell<'p> {
-    fn from_buffer(buf: &'p [u8], page_type: PageType) -> (Self, &'p [u8]) {
-        let (length_or_rowid, buf) = VarInt::from_buffer(buf);
-
-        match page_type {
-            PageType::Interior => (
-                Self {
-                    rowid: length_or_rowid,
-                    payload: None,
-                },
-                buf,
-            ),
-            PageType::Leaf => {
-                let length = length_or_rowid;
-                let (rowid, buf) = VarInt::from_buffer(buf);
-                let (payload, buf) = Payload::from_buf_with_length(buf, length);
-
-                (
-                    Self {
-                        rowid,
-                        payload: Some(payload),
-                    },
-                    buf,
-                )
-            }
-        }
-    }
-
-    fn get_debug(&self) -> usize {
-        self.rowid.0 as usize
-    }
-}
-
-pub struct IndexCell<'p> {
-    /// Payload of the cell.
-    payload: Payload<'p>,
-}
-
-impl<'p> PageCell<'p> for IndexCell<'p> {
-    fn from_buffer(buf: &'p [u8], page_type: PageType) -> (Self, &'p [u8]) {
-        let (payload, buf) = Payload::from_buf(buf);
-        (Self { payload }, buf)
-    }
-
-    fn get_debug(&self) -> usize {
-        self.payload.length.0 as usize
-    }
-}
-
-pub trait PageCell<'p>: Sized {
-    fn from_buffer(buf: &'p [u8], page_type: PageType) -> (Self, &'p [u8]);
-    fn get_debug(&self) -> usize;
-}
-
-pub struct Payload<'p> {
-    length: VarInt,
-    payload: &'p [u8],
-    overflow_page: Option<usize>,
-}
-
-impl<'p> Payload<'p> {
-    fn from_buf_with_length(buf: &'p [u8], length: VarInt) -> (Self, &'p [u8]) {
-        // TODO: Calculate payload length
-
-        (
-            Self {
-                length,
-                payload: &buf[0..0],
-                overflow_page: None,
-            },
-            buf,
-        )
-    }
-
-    fn from_buf(buf: &'p [u8]) -> (Self, &'p [u8]) {
-        let (length, buf) = VarInt::from_buffer(buf);
-
-        Self::from_buf_with_length(buf, length)
-    }
-}
-
-struct VarInt(i64);
-impl VarInt {
-    pub fn from_buffer(mut buf: &[u8]) -> (Self, &[u8]) {
-        let mut value: i64 = 0;
-
-        for (i, b) in buf.iter().take(9).enumerate() {
-            let mask = 0xffu8 >> (1 - (i / 8));
-            let shift = 7 + (i / 8);
-            buf = &buf[1..];
-
-            value = (value << shift) + (b & mask) as i64;
-
-            if b >> 7 == 0 {
-                break;
-            }
-        }
-
-        (Self(value), buf)
     }
 }
 

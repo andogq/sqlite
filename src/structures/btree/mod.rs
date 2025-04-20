@@ -1,6 +1,9 @@
+pub mod cell;
 pub mod page;
 
 use std::marker::PhantomData;
+
+use cell::PageCell;
 
 use crate::memory::{
     pager::{PageId, Pager},
@@ -52,7 +55,7 @@ impl<'b, K: TreeKind> BTreeWalker<'b, K> {
         let page = op.get_cell_buffer(self.current_cell);
         Some(CellRef {
             page,
-            page_type: op.header().0.get_page_type(),
+            page_type: op.header().get_page_type(),
             kind: PhantomData,
         })
     }
@@ -75,20 +78,6 @@ impl<K: TreeKind> CellRef<K> {
 pub trait TreeKind {
     const MASK: u8;
     type Cell<'p>: PageCell<'p>;
-}
-
-#[derive(Debug)]
-pub enum Table {}
-#[derive(Debug)]
-pub enum Index {}
-
-impl TreeKind for Table {
-    const MASK: u8 = 0b101;
-    type Cell<'p> = TableCell<'p>;
-}
-impl TreeKind for Index {
-    const MASK: u8 = 0b010;
-    type Cell<'p> = IndexCell<'p>;
 }
 
 #[derive(Clone, Copy)]
