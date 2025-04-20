@@ -2,25 +2,21 @@ pub mod page;
 
 use std::marker::PhantomData;
 
-use crate::{
-    memory::*,
-    pager::{PageId, SomePager},
+use crate::memory::{
+    pager::{PageId, Pager},
+    *,
 };
 
 use self::page::*;
 
 pub struct BTree<K: TreeKind> {
-    pager: Box<dyn SomePager>,
+    pager: Pager,
     root_page: PageId,
     kind: PhantomData<fn() -> K>,
 }
 
 impl<K: TreeKind> BTree<K> {
-    pub fn new(pager: impl 'static + SomePager, root_page: PageId) -> Self {
-        Self::new_with_pager(Box::new(pager), root_page)
-    }
-
-    pub fn new_with_pager(pager: Box<dyn SomePager>, root_page: PageId) -> Self {
+    pub fn new(pager: Pager, root_page: PageId) -> Self {
         Self {
             pager,
             root_page,
