@@ -9,7 +9,7 @@ use std::{
 
 use disk::{PageId, Pager, SomePager};
 use structures::{
-    btree::{BTree, Table},
+    btree::{BTree, BTreeWalker, Table},
     header::{SQLITE_HEADER_SIZE, SqliteHeader},
 };
 
@@ -19,11 +19,11 @@ fn main() {
     let file = File::open(DATABASE).unwrap();
 
     let pager = bootstrap(file).unwrap();
-    let mut btree = BTree::<Table>::new_with_pager(pager);
+    let btree = BTree::<Table>::new_with_pager(pager, PageId::FIRST);
 
-    let page = btree.get_page(PageId::FIRST);
-
-    dbg!(&page);
+    let walker = BTreeWalker::new(&btree);
+    let cell = walker.get_cell().unwrap();
+    dbg!(cell.get());
 }
 
 fn bootstrap<'source>(
@@ -31,7 +31,10 @@ fn bootstrap<'source>(
 ) -> Result<Box<dyn 'source + SomePager>, std::io::Error> {
     let mut pager = Pager::new(source, SQLITE_HEADER_SIZE, 16);
 
-    let header = SqliteHeader::read_from_buffer(pager.get(PageId::HEADER)?.unwrap()).unwrap();
+    let page = pager.get(PageId::HEADER)?.unwrap();
+    let buf = &page.buffer();
+
+    let header = SqliteHeader::read_from_buffer(buf).unwrap();
     let page_size = header.page_size();
 
     // Update the pager.

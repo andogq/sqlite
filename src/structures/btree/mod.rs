@@ -2,57 +2,85 @@ pub mod page;
 
 use std::marker::PhantomData;
 
-use zerocopy::{FromBytes, big_endian::U32};
+use zerocopy::{
+    FromBytes,
+    big_endian::{U16, U32},
+};
 
-use crate::disk::{PageId, SomePager};
+use crate::disk::{PageId, PageSlice, SomePager};
 
 use self::page::*;
 
 pub struct BTree<K: TreeKind> {
     pager: Box<dyn SomePager>,
+    root_page: PageId,
     kind: PhantomData<fn() -> K>,
 }
 
 impl<K: TreeKind> BTree<K> {
-    pub fn new(pager: impl 'static + SomePager) -> Self {
-        Self {
-            pager: Box::new(pager),
-            kind: PhantomData,
-        }
+    pub fn new(pager: impl 'static + SomePager, root_page: PageId) -> Self {
+        Self::new_with_pager(Box::new(pager), root_page)
     }
 
-    pub fn new_with_pager(pager: Box<dyn SomePager>) -> Self {
+    pub fn new_with_pager(pager: Box<dyn SomePager>, root_page: PageId) -> Self {
         Self {
             pager,
+            root_page,
             kind: PhantomData,
         }
     }
 
-    pub fn get_page(&mut self, page_id: PageId) -> Page<'_, K> {
-        let buf = self.pager.get(page_id).unwrap().unwrap();
+    pub fn get_page(&self, page_id: PageId) -> Page<K> {
+        let disk_page = self.pager.get(page_id).unwrap().unwrap();
+        Page::new(disk_page)
+    }
+}
 
-        let (header, data) = PageHeader::read_from_prefix(buf).unwrap();
+pub struct BTreeWalker<'b, K: TreeKind> {
+    tree: &'b BTree<K>,
+    current_page: Page<K>,
+    current_cell: usize,
+}
 
-        let (right_pointer, data) = match header.get_page_type() {
-            PageType::Interior => {
-                // Fetch the right pointer which is present after the header.
-                let (right_pointer, data) = U32::ref_from_prefix(data).unwrap();
-                (Some(right_pointer.get()), data)
-            }
-            PageType::Leaf => (None, data),
-        };
+impl<'b, K: TreeKind> BTreeWalker<'b, K> {
+    pub fn new(tree: &'b BTree<K>) -> Self {
+        let page = tree.get_page(tree.root_page);
 
-        Page {
-            header,
-            right_pointer,
-            data,
-            kind: PhantomData,
+        Self {
+            tree,
+            current_page: page,
+            current_cell: 0,
         }
+    }
+
+    pub fn get_cell(&self) -> Option<CellRef<K>> {
+        let op = self.current_page.operate();
+        let page = op.get_cell_buffer(self.current_cell);
+        Some(CellRef {
+            page,
+            page_type: op.header().0.get_page_type(),
+            kind: PhantomData,
+        })
+    }
+}
+
+pub struct CellRef<K: TreeKind> {
+    page: PageSlice,
+    page_type: PageType,
+    kind: PhantomData<fn() -> K>,
+}
+
+impl<K: TreeKind> CellRef<K> {
+    pub fn get(&self) -> usize {
+        let buf = self.page.buffer();
+        let (cell, buf) = K::Cell::from_buffer(&buf, self.page_type);
+        cell.get_debug()
     }
 }
 
 pub trait TreeKind {
     const MASK: u8;
+    type Cell<'p>: PageCell<'p>;
 }
 
 #[derive(Debug)]
@@ -62,11 +90,14 @@ pub enum Index {}
 
 impl TreeKind for Table {
     const MASK: u8 = 0b101;
+    type Cell<'p> = TableCell<'p>;
 }
 impl TreeKind for Index {
     const MASK: u8 = 0b010;
+    type Cell<'p> = IndexCell<'p>;
 }
 
+#[derive(Clone, Copy)]
 pub enum PageType {
     Leaf,
     Interior,
@@ -79,15 +110,4 @@ impl PageType {
             true => Self::Leaf,
         }
     }
-}
-
-pub struct Payload<'p> {
-    size: u64,
-    payload: &'p [u8],
-    overflow: Option<u32>,
-}
-
-pub struct Cell<'p> {
-    left_pointer: Option<u32>,
-    payload: Option<Payload<'p>>,
 }
