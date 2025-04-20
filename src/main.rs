@@ -1,6 +1,5 @@
 mod memory;
 mod structures;
-mod varint;
 
 use std::fs::File;
 
