@@ -1,6 +1,6 @@
 use crate::structures::btree::{PageType, TreeKind};
 
-use super::{PageCell, Payload};
+use super::{PageCell, PageCtx, Payload};
 
 #[derive(Debug)]
 pub enum Index {}
@@ -16,12 +16,12 @@ pub struct IndexCell<'p> {
 }
 
 impl<'p> PageCell<'p> for IndexCell<'p> {
-    fn from_buffer(buf: &'p [u8], _page_type: PageType) -> (Self, &'p [u8]) {
-        let (payload, buf) = Payload::from_buf(buf);
-        (Self { payload }, buf)
+    fn from_buffer(ctx: &'_ PageCtx, buf: &'p [u8], _page_type: PageType) -> Self {
+        let payload = Payload::from_buf::<Index>(ctx, buf);
+        Self { payload }
     }
 
     fn get_debug(&self) -> usize {
-        *self.payload.length as usize
+        self.payload.payload_size
     }
 }

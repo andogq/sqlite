@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, hash_map::Entry},
     io::{Read, Seek, SeekFrom},
+    num::NonZero,
 };
 
 use crate::{
@@ -61,6 +62,16 @@ impl Pager {
         }))
     }
 
+    pub fn get_header(&self) -> Result<HeaderRef, std::io::Error> {
+        assert!(
+            self.page_size >= SQLITE_HEADER_SIZE,
+            "page size must be large enough for header"
+        );
+
+        let page = self.get(PageId::FIRST)?.unwrap();
+        Ok(HeaderRef(page))
+    }
+
     /// Create an instance from the provided source, by attempting to read the [`SqliteHeader`]
     /// from the beginning of the soruce and using it for configuration.
     pub fn bootstrap(mut source: impl Source) -> Result<Self, std::io::Error> {
@@ -70,7 +81,7 @@ impl Pager {
         let mut pager = Self::new(source, SQLITE_HEADER_SIZE, 16);
 
         // Read the header.
-        let page = pager.get(PageId::HEADER)?.unwrap();
+        let page = pager.get(PageId::FIRST)?.unwrap();
         let buf = &page.buffer();
         let header = SqliteHeader::read_from_buffer(buf).unwrap();
 
@@ -91,30 +102,34 @@ impl<S: 'static + Seek + Read> Source for S {}
 /// SQLite pages start from 1, however page 0 here is used for a smaller page which represents the
 /// SQLite header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PageId(usize);
+pub struct PageId(NonZero<usize>);
 
 impl PageId {
-    /// Page ID which contains the SQLite header.
-    ///
-    /// This doesn't exist in 'standard' SQLite, so the otherwise unused page ID of 0 is selected
-    /// for this purpose.
-    pub const HEADER: Self = PageId(0);
-
     /// The first page which contains a [`BTree`].
-    pub const FIRST: Self = PageId(1);
+    pub const FIRST: Self = PageId(NonZero::new(1).unwrap());
 
     /// Create a new page id with the given id.
-    pub const fn new(page_id: usize) -> Self {
+    pub const fn new(page_id: NonZero<usize>) -> Self {
         Self(page_id)
     }
 
     /// Get the binary offset for the given page for a given page size, inclusive of the header
     /// bytes which are present in the first page.
     pub const fn get_offset(&self, page_size: usize) -> usize {
-        if self.0 == Self::FIRST.0 {
-            return SQLITE_HEADER_SIZE;
-        }
+        (self.0.get() - 1) * page_size
+    }
 
-        self.0 * page_size
+    pub fn is_header_page(&self) -> bool {
+        self == &Self::FIRST
+    }
+}
+
+#[derive(Clone)]
+pub struct HeaderRef(MemoryPage);
+impl HeaderRef {
+    pub fn header<T>(&self, f: impl FnOnce(&SqliteHeader) -> T) -> T {
+        let buf = &self.0.buffer()[..SQLITE_HEADER_SIZE];
+        let header = SqliteHeader::read_from_buffer(buf).unwrap();
+        f(header)
     }
 }

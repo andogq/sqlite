@@ -7,7 +7,7 @@ use zerocopy::{
     big_endian::{U16, U32},
 };
 
-use crate::memory::*;
+use crate::{PageId, memory::*, structures::header::SQLITE_HEADER_SIZE};
 
 use super::{
     PageType, TreeKind,
@@ -16,13 +16,15 @@ use super::{
 
 #[derive(Clone)]
 pub struct Page<K: TreeKind> {
+    pub page_id: PageId,
     pub disk_page: MemoryPage,
     pub kind: PhantomData<K>,
 }
 
 impl<K: TreeKind> Page<K> {
-    pub fn new(disk_page: MemoryPage) -> Self {
+    pub fn new(page_id: PageId, disk_page: MemoryPage) -> Self {
         Self {
+            page_id,
             disk_page,
             kind: PhantomData,
         }
@@ -52,10 +54,24 @@ where
         }
     }
 
+    fn header_offset(&self) -> usize {
+        if self.page.page_id.is_header_page() {
+            SQLITE_HEADER_SIZE
+        } else {
+            0
+        }
+    }
+
+    fn after_header_offset(&self) -> usize {
+        self.header_offset() + size_of::<PageHeader<K>>()
+    }
+
     /// Parse the page header from the buffer.
     pub fn header(&self) -> &PageHeader<K> {
+        let buf = &self.buf[self.header_offset()..];
+
         // Read out the base of the header.
-        let (header, _) = PageHeader::<K>::read_from_prefix(&self.buf).unwrap();
+        let (header, _) = PageHeader::<K>::read_from_prefix(buf).unwrap();
 
         header
     }
@@ -65,7 +81,7 @@ where
         match self.header().get_page_type() {
             PageType::Interior => {
                 // Advance buffer beyond page header.
-                let buf = &self.buf[size_of::<PageHeader<K>>()..];
+                let buf = &self.buf[self.after_header_offset()..];
 
                 // Fetch the right pointer.
                 let (right_pointer, _) = U32::ref_from_prefix(buf).unwrap();
@@ -80,7 +96,7 @@ where
         let header = self.header();
 
         // Calculate the offset past the page header, and the optional right pointer.
-        let offset = size_of::<PageHeader<K>>()
+        let offset = self.after_header_offset()
             + match header.get_page_type() {
                 PageType::Leaf => 0,
                 PageType::Interior => size_of::<U32>(),
@@ -105,7 +121,9 @@ where
         // Select the relevant area of the cell content area.
         let offset = cell_pointer_array[cell_number].get() as usize;
 
-        self.page.disk_page.slice(offset..)
+        let buf = self.page.disk_page.slice(offset..);
+
+        buf
     }
 }
 

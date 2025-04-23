@@ -184,6 +184,14 @@ impl SqliteHeader {
         n
     }
 
+    pub fn page_end_padding(&self) -> u8 {
+        self.page_end_padding
+    }
+
+    pub fn page_count(&self) -> u32 {
+        self.page_count.get()
+    }
+
     /// Get the (major, minor, patch) version of this database.
     pub fn sqlite_version_number(&self) -> (u16, u16, u16) {
         let version = self.sqlite_version_number.get();

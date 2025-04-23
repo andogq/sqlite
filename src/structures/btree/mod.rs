@@ -1,9 +1,9 @@
 pub mod cell;
 pub mod page;
 
-use std::marker::PhantomData;
+use std::{fmt::Debug, marker::PhantomData};
 
-use cell::PageCell;
+use cell::{PageCell, PageCtx};
 
 use crate::memory::{
     pager::{PageId, Pager},
@@ -29,7 +29,7 @@ impl<K: TreeKind> BTree<K> {
 
     pub fn get_page(&self, page_id: PageId) -> Page<K> {
         let disk_page = self.pager.get(page_id).unwrap().unwrap();
-        Page::new(disk_page)
+        Page::new(page_id, disk_page)
     }
 }
 
@@ -68,14 +68,14 @@ pub struct CellRef<K: TreeKind> {
 }
 
 impl<K: TreeKind> CellRef<K> {
-    pub fn get(&self) -> usize {
+    pub fn get(&self, ctx: &PageCtx) -> usize {
         let buf = self.page.buffer();
-        let (cell, buf) = K::Cell::from_buffer(&buf, self.page_type);
+        let cell = K::Cell::from_buffer(ctx, &buf, self.page_type);
         cell.get_debug()
     }
 }
 
-pub trait TreeKind {
+pub trait TreeKind: Debug {
     const MASK: u8;
     type Cell<'p>: PageCell<'p>;
 }

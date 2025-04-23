@@ -1,9 +1,13 @@
 pub mod index;
 pub mod table;
 
-use crate::structures::VarInt;
+use std::cmp::Ordering;
 
-use super::PageType;
+use zerocopy::{FromBytes, big_endian::U32};
+
+use crate::structures::{VarInt, header::SqliteHeader};
+
+use super::{PageType, TreeKind};
 
 pub use self::{
     index::{Index, IndexCell},
@@ -11,33 +15,105 @@ pub use self::{
 };
 
 pub trait PageCell<'p>: Sized {
-    fn from_buffer(buf: &'p [u8], page_type: PageType) -> (Self, &'p [u8]);
+    fn from_buffer(ctx: &'_ PageCtx, buf: &'p [u8], page_type: PageType) -> Self;
     fn get_debug(&self) -> usize;
 }
 
+#[derive(Clone, Debug)]
 pub struct Payload<'p> {
-    length: VarInt,
+    /// Total size of the payload, including any overflow.
+    payload_size: usize,
+
+    /// Payload included in the page.
     payload: &'p [u8],
+
+    /// Page of the overflow.
     overflow_page: Option<usize>,
 }
 
 impl<'p> Payload<'p> {
-    fn from_buf_with_length(buf: &'p [u8], length: VarInt) -> (Self, &'p [u8]) {
-        // TODO: Calculate payload length
+    /// Read the payload from the start of the provided buffer.
+    fn from_buf_with_payload_size<K: PayloadCalculation>(
+        ctx: &'_ PageCtx,
+        buf: &'p [u8],
+        payload_size: usize,
+    ) -> Self {
+        // U: The usable size of a database page (the total page size less the reserved space at
+        // the end of each page).
+        let usable_space = ctx.page_size as usize - ctx.page_end_padding as usize;
 
-        (
-            Self {
-                length,
-                payload: &buf[0..0],
-                overflow_page: None,
-            },
-            buf,
-        )
+        // X: The maximum amount of payload that can be stored directly on the b-tree page without
+        // spilling onto an overflow page.
+        let max_page_payload = K::max_page_payload(usable_space);
+
+        // M: The minimum amount of payload that must be stored onthe btree page before spilling is
+        // allowed.
+        let min_page_payload = ((usable_space - 12) * 32 / 255) - 23;
+
+        let k = (min_page_payload as isize
+            + ((payload_size as isize - min_page_payload as isize) % (usable_space as isize - 4)))
+            as usize;
+
+        let (stored, overflow_page) = match (
+            (payload_size).cmp(&max_page_payload),
+            k.cmp(&max_page_payload),
+        ) {
+            (Ordering::Less | Ordering::Equal, _) => (payload_size, None),
+            (Ordering::Greater, Ordering::Less | Ordering::Equal) => (k, Some(payload_size - k)),
+            (Ordering::Greater, Ordering::Greater) => {
+                (min_page_payload, Some(payload_size - min_page_payload))
+            }
+        };
+
+        let payload = &buf[..stored];
+        let overflow_page = overflow_page.map(|_| {
+            let (overflow_page, _) = U32::ref_from_prefix(&buf[stored..]).unwrap();
+            overflow_page.get() as usize
+        });
+
+        Self {
+            payload_size,
+            payload,
+            overflow_page,
+        }
     }
 
-    fn from_buf(buf: &'p [u8]) -> (Self, &'p [u8]) {
+    fn from_buf<K: PayloadCalculation>(ctx: &'_ PageCtx, buf: &'p [u8]) -> Self {
         let (length, buf) = VarInt::from_buffer(buf);
 
-        Self::from_buf_with_length(buf, length)
+        Self::from_buf_with_payload_size::<K>(ctx, buf, *length as usize)
+    }
+}
+
+trait PayloadCalculation: TreeKind {
+    fn max_page_payload(usable_space: usize) -> usize;
+}
+
+impl PayloadCalculation for Table {
+    fn max_page_payload(usable_space: usize) -> usize {
+        usable_space - 35
+    }
+}
+
+impl PayloadCalculation for Index {
+    fn max_page_payload(usable_space: usize) -> usize {
+        ((usable_space - 12) * 64 / 255) - 23
+    }
+}
+
+/// Relevant information from the header when working with pages.
+pub struct PageCtx {
+    page_size: u32,
+    page_end_padding: u8,
+    page_count: u32,
+}
+
+impl From<&SqliteHeader> for PageCtx {
+    fn from(header: &SqliteHeader) -> Self {
+        Self {
+            page_size: header.page_size(),
+            page_end_padding: header.page_end_padding(),
+            page_count: header.page_count(),
+        }
     }
 }
