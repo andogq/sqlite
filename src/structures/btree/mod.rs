@@ -51,13 +51,18 @@ impl<'b, K: TreeKind> BTreeWalker<'b, K> {
     }
 
     pub fn get_cell(&self) -> Option<CellRef<K>> {
-        let op = self.current_page.operate();
-        let page = op.get_cell_buffer(self.current_cell);
-        Some(CellRef {
-            page,
-            page_type: op.header().get_page_type(),
-            kind: PhantomData,
-        })
+        let cell = self.current_page.process(|data: PageContent<K>| {
+            let offset = data.pointer_array[self.current_cell].get() as usize;
+            let buf = data.page_ref.page().slice(offset..);
+
+            CellRef {
+                page: buf,
+                page_type: data.header.page_type(),
+                kind: PhantomData,
+            }
+        });
+
+        Some(cell)
     }
 }
 
@@ -75,7 +80,7 @@ impl<K: TreeKind> CellRef<K> {
     }
 }
 
-pub trait TreeKind: Debug {
+pub trait TreeKind: 'static + Clone + Debug {
     const MASK: u8;
     type Cell<'p>: PageCell<'p>;
 }

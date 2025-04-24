@@ -18,7 +18,7 @@ use super::{
 pub struct Page<K: TreeKind> {
     pub page_id: PageId,
     pub disk_page: MemoryPage,
-    pub kind: PhantomData<K>,
+    pub kind: PhantomData<fn() -> K>,
 }
 
 impl<K: TreeKind> Page<K> {
@@ -29,101 +29,68 @@ impl<K: TreeKind> Page<K> {
             kind: PhantomData,
         }
     }
+}
 
-    pub fn operate<'p, 'b>(&'p self) -> PageOperation<'p, 'b, K>
-    where
-        'p: 'b,
-    {
-        PageOperation::new(self)
+impl<K: TreeKind> Process for Page<K> {
+    type Data<'a> = PageContent<'a, K>;
+
+    fn get_page_ref(&self) -> MemoryPageRef<'_> {
+        self.disk_page.buffer()
     }
 }
 
-pub struct PageOperation<'p, 'b, K: TreeKind> {
-    page: &'p Page<K>,
-    buf: MemoryPageRef<'b>,
+/// Content of a page, containing references to the underlying buffers. This struct is intended to
+/// be constructed using [`FromMemoryPageRef`].
+///
+/// `'r` is the lifetime of the underlying memory page reference that the instance was constructed
+/// from.
+#[derive(Clone)]
+pub struct PageContent<'r, K: TreeKind> {
+    /// Page header.
+    pub header: &'r PageHeader<K>,
+    /// Right pointer, only present on interior pages.
+    pub right_pointer: Option<u32>,
+    /// Array of offsets pointing to each page.
+    pub pointer_array: &'r [U16],
+    /// Buffer containing cell content.
+    pub content_buffer: &'r [u8],
+    /// Reference to the underlying [`MemoryPageRef`].
+    ///
+    /// This is a bit hacky, and should be removed. Alternatively, the lifetime of the reference
+    /// should be `'c`, similar to [`FromMemoryPageRef::from_ref`].
+    pub page_ref: &'r MemoryPageRef<'r>,
 }
 
-impl<'p, 'b, K: TreeKind> PageOperation<'p, 'b, K>
-where
-    'p: 'b,
-{
-    fn new(page: &'p Page<K>) -> Self {
-        Self {
-            page,
-            buf: page.disk_page.buffer(),
-        }
-    }
-
-    fn header_offset(&self) -> usize {
-        if self.page.page_id.is_header_page() {
+impl<'r, K: TreeKind> FromMemoryPageRef<'r, &Page<K>> for PageContent<'r, K> {
+    fn from_ref<'c: 'r>(page: &Page<K>, page_ref: &'c MemoryPageRef<'r>) -> Self {
+        let header_offset = if page.page_id.is_header_page() {
             SQLITE_HEADER_SIZE
         } else {
             0
-        }
-    }
+        };
 
-    fn after_header_offset(&self) -> usize {
-        self.header_offset() + size_of::<PageHeader<K>>()
-    }
+        let (header, buf) = PageHeader::<K>::read_from_prefix(&page_ref[header_offset..]).unwrap();
 
-    /// Parse the page header from the buffer.
-    pub fn header(&self) -> &PageHeader<K> {
-        let buf = &self.buf[self.header_offset()..];
-
-        // Read out the base of the header.
-        let (header, _) = PageHeader::<K>::read_from_prefix(buf).unwrap();
-
-        header
-    }
-
-    /// Fetch the right pointer of the page, if it's present.
-    pub fn get_right_pointer(&self) -> Option<u32> {
-        match self.header().get_page_type() {
+        let (right_pointer, buf) = match header.page_type() {
             PageType::Interior => {
-                // Advance buffer beyond page header.
-                let buf = &self.buf[self.after_header_offset()..];
-
                 // Fetch the right pointer.
-                let (right_pointer, _) = U32::ref_from_prefix(buf).unwrap();
-                Some(right_pointer.get())
+                let (right_pointer, buf) = U32::ref_from_prefix(buf).unwrap();
+                (Some(right_pointer.get()), buf)
             }
-            PageType::Leaf => None,
-        }
-    }
-
-    /// Calculate the slice of the cell pointer array.
-    fn get_cell_pointer_array(&self) -> &[U16] {
-        let header = self.header();
-
-        // Calculate the offset past the page header, and the optional right pointer.
-        let offset = self.after_header_offset()
-            + match header.get_page_type() {
-                PageType::Leaf => 0,
-                PageType::Interior => size_of::<U32>(),
-            };
-        let buf = &self.buf[offset..];
+            PageType::Leaf => (None, buf),
+        };
 
         // Parse out the pointer array.
-        let (cell_pointer_array, _) =
+        let (pointer_array, content_buffer) =
             <[U16]>::ref_from_prefix_with_elems(buf, header.cell_count.get().into()).unwrap();
-        cell_pointer_array
-    }
 
-    pub fn get_cell_buffer(&self, cell_number: usize) -> MemoryPage {
-        let header = self.header();
-
-        if cell_number >= header.cell_count.get() as usize {
-            panic!("offset larger than available cells");
+        Self {
+            header,
+            right_pointer,
+            pointer_array,
+            content_buffer,
+            page_ref,
         }
-
-        let cell_pointer_array = self.get_cell_pointer_array();
-
-        // Select the relevant area of the cell content area.
-        let offset = cell_pointer_array[cell_number].get() as usize;
-
-        let buf = self.page.disk_page.slice(offset..);
-
-        buf
     }
 }
 
@@ -163,8 +130,12 @@ impl<K: TreeKind> PageHeader<K> {
         Ok(())
     }
 
-    pub(super) fn get_page_type(&self) -> PageType {
+    pub fn page_type(&self) -> PageType {
         PageType::from_page_flag(self.page_flag)
+    }
+
+    pub fn cell_content_offset(&self) -> u16 {
+        self.cell_content_offset.get()
     }
 }
 

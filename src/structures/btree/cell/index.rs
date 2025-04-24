@@ -2,7 +2,7 @@ use crate::structures::btree::{PageType, TreeKind};
 
 use super::{PageCell, PageCtx, Payload};
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Index {}
 
 impl TreeKind for Index {

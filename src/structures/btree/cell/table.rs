@@ -5,7 +5,7 @@ use crate::structures::{
 
 use super::{PageCell, PageCtx, Payload};
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Table {}
 
 impl TreeKind for Table {

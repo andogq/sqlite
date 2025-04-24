@@ -86,10 +86,12 @@ impl MemoryPage {
         MemoryPageRef::new(match &*self.0 {
             MemoryPageInner::Buffer { buffer } => MemoryPageRefInner::Buffer {
                 buffer: buffer.borrow(),
+                page: self,
             },
             MemoryPageInner::Slice { parent, bounds } => MemoryPageRefInner::Slice {
                 parent: parent.buffer(),
                 bounds: *bounds,
+                page: self,
             },
         })
     }
@@ -115,6 +117,8 @@ pub enum MemoryPageRefInner<'p> {
     Buffer {
         /// Underlying buffer borrow.
         buffer: Ref<'p, MemoryBuffer>,
+        /// Original page that this ref originates from.
+        page: &'p MemoryPage,
     },
     /// Slice into another [`MemoryPageRef`].
     Slice {
@@ -122,6 +126,8 @@ pub enum MemoryPageRefInner<'p> {
         parent: MemoryPageRef<'p>,
         /// Requested bounds.
         bounds: (Bound<usize>, Bound<usize>),
+        /// Original page that this ref originates from.
+        page: &'p MemoryPage,
     },
 }
 
@@ -129,6 +135,14 @@ impl<'p> MemoryPageRef<'p> {
     /// Create a new instance with the provided inner.
     fn new(inner: MemoryPageRefInner<'p>) -> Self {
         Self(Rc::new(inner))
+    }
+
+    /// Produce a copy of the original page that this ref is from.
+    pub fn page(&self) -> MemoryPage {
+        match *self.0 {
+            MemoryPageRefInner::Buffer { page, .. } => page.clone(),
+            MemoryPageRefInner::Slice { page, .. } => page.clone(),
+        }
     }
 }
 
@@ -138,9 +152,9 @@ impl Deref for MemoryPageRef<'_> {
     fn deref(&self) -> &Self::Target {
         match &*self.0 {
             // Produce the inner buffer.
-            MemoryPageRefInner::Buffer { buffer } => &buffer.0,
+            MemoryPageRefInner::Buffer { buffer, .. } => &buffer.0,
             // Dereference the parent, and apply the bounds to the result.
-            MemoryPageRefInner::Slice { parent, bounds } => &parent[*bounds],
+            MemoryPageRefInner::Slice { parent, bounds, .. } => &parent[*bounds],
         }
     }
 }
