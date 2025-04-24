@@ -15,21 +15,23 @@ use self::page::*;
 pub struct BTree<K: TreeKind> {
     pager: Pager,
     root_page: PageId,
+    page_ctx: PageCtx,
     kind: PhantomData<fn() -> K>,
 }
 
 impl<K: TreeKind> BTree<K> {
-    pub fn new(pager: Pager, root_page: PageId) -> Self {
+    pub fn new(pager: Pager, root_page: PageId, page_ctx: PageCtx) -> Self {
         Self {
             pager,
             root_page,
+            page_ctx,
             kind: PhantomData,
         }
     }
 
     pub fn get_page(&self, page_id: PageId) -> Page<K> {
         let disk_page = self.pager.get(page_id).unwrap().unwrap();
-        Page::new(page_id, disk_page)
+        Page::new(page_id, self.page_ctx.clone(), disk_page)
     }
 }
 
@@ -52,6 +54,9 @@ impl<'b, K: TreeKind> BTreeWalker<'b, K> {
 
     pub fn get_cell(&self) -> Option<CellRef<K>> {
         let cell = self.current_page.process(|data: PageContent<K>| {
+            let cell = data.get_cell(self.current_cell);
+            dbg!(cell.get_debug());
+
             let offset = data.pointer_array[self.current_cell].get() as usize;
             let buf = data.page_ref.page().slice(offset..);
 

@@ -83,6 +83,42 @@ impl<'p> Payload<'p> {
 
         Self::from_buf_with_payload_size::<K>(ctx, buf, *length as usize)
     }
+
+    pub fn debug(&self) {
+        assert!(self.overflow_page.is_none());
+
+        let (header_length, buf) = VarInt::from_buffer(self.payload);
+        let remaining_header_length = *header_length as usize - (self.payload.len() - buf.len());
+
+        let mut header_buf = &buf[..remaining_header_length];
+
+        while !header_buf.is_empty() {
+            let (serial_type, buf) = VarInt::from_buffer(header_buf);
+            header_buf = buf;
+
+            println!(
+                "{}",
+                match *serial_type {
+                    0 => "NULL",
+                    1 => "i8",
+                    2 => "i16",
+                    3 => "i24",
+                    4 => "i32",
+                    5 => "i48",
+                    6 => "i64",
+                    7 => "f64",
+                    8 => "0",
+                    9 => "1",
+                    10 | 11 => "reserved",
+                    n @ 12.. if n % 2 == 0 => "BLOB",
+                    n @ 13.. if n % 2 == 1 => "text",
+                    _ => unreachable!(),
+                }
+            )
+        }
+
+        dbg!(remaining_header_length);
+    }
 }
 
 trait PayloadCalculation: TreeKind {
@@ -102,6 +138,7 @@ impl PayloadCalculation for Index {
 }
 
 /// Relevant information from the header when working with pages.
+#[derive(Clone)]
 pub struct PageCtx {
     page_size: u32,
     page_end_padding: u8,

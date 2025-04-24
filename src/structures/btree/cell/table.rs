@@ -44,7 +44,12 @@ impl<'p> PageCell<'p> for TableCell<'p> {
     }
 
     fn get_debug(&self) -> usize {
-        dbg!(&self.payload);
+        if let Some(payload) = &self.payload {
+            payload.debug();
+        } else {
+            dbg!("no payload :(");
+        }
+
         *self.rowid as usize
     }
 }

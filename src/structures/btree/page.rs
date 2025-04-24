@@ -11,20 +11,22 @@ use crate::{PageId, memory::*, structures::header::SQLITE_HEADER_SIZE};
 
 use super::{
     PageType, TreeKind,
-    cell::{Index, Table},
+    cell::{Index, PageCell, PageCtx, Table},
 };
 
 #[derive(Clone)]
 pub struct Page<K: TreeKind> {
     pub page_id: PageId,
+    pub page_ctx: PageCtx,
     pub disk_page: MemoryPage,
     pub kind: PhantomData<fn() -> K>,
 }
 
 impl<K: TreeKind> Page<K> {
-    pub fn new(page_id: PageId, disk_page: MemoryPage) -> Self {
+    pub fn new(page_id: PageId, page_ctx: PageCtx, disk_page: MemoryPage) -> Self {
         Self {
             page_id,
+            page_ctx,
             disk_page,
             kind: PhantomData,
         }
@@ -46,6 +48,7 @@ impl<K: TreeKind> Process for Page<K> {
 /// from.
 #[derive(Clone)]
 pub struct PageContent<'r, K: TreeKind> {
+    page_ctx: &'r PageCtx,
     /// Page header.
     pub header: &'r PageHeader<K>,
     /// Right pointer, only present on interior pages.
@@ -61,8 +64,8 @@ pub struct PageContent<'r, K: TreeKind> {
     pub page_ref: &'r MemoryPageRef<'r>,
 }
 
-impl<'r, K: TreeKind> FromMemoryPageRef<'r, &Page<K>> for PageContent<'r, K> {
-    fn from_ref<'c: 'r>(page: &Page<K>, page_ref: &'c MemoryPageRef<'r>) -> Self {
+impl<'r, K: TreeKind> FromMemoryPageRef<'r, &'r Page<K>> for PageContent<'r, K> {
+    fn from_ref<'c: 'r>(page: &'r Page<K>, page_ref: &'c MemoryPageRef<'r>) -> Self {
         let header_offset = if page.page_id.is_header_page() {
             SQLITE_HEADER_SIZE
         } else {
@@ -81,16 +84,30 @@ impl<'r, K: TreeKind> FromMemoryPageRef<'r, &Page<K>> for PageContent<'r, K> {
         };
 
         // Parse out the pointer array.
-        let (pointer_array, content_buffer) =
+        let (pointer_array, _) =
             <[U16]>::ref_from_prefix_with_elems(buf, header.cell_count.get().into()).unwrap();
 
         Self {
+            page_ctx: &page.page_ctx,
             header,
             right_pointer,
             pointer_array,
-            content_buffer,
+            content_buffer: &page_ref[header.cell_content_offset() as usize..],
             page_ref,
         }
+    }
+}
+
+impl<'r, K: TreeKind> PageContent<'r, K> {
+    pub fn get_cell(&self, i: usize) -> K::Cell<'r> {
+        let offset =
+            self.pointer_array[i].get() as usize - self.header.cell_content_offset() as usize;
+
+        K::Cell::from_buffer(
+            self.page_ctx,
+            &self.content_buffer[offset..],
+            self.header.page_type(),
+        )
     }
 }
 

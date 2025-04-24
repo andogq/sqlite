@@ -3,7 +3,7 @@ mod structures;
 
 use std::fs::File;
 
-use structures::btree::cell::Table;
+use structures::btree::cell::{PageCtx, Table};
 
 use crate::{
     memory::pager::*,
@@ -18,11 +18,15 @@ fn main() {
     let pager = Pager::bootstrap(file).unwrap();
     let header = pager.get_header().unwrap();
 
-    let btree = BTree::<Table>::new(pager, PageId::FIRST);
+    let btree = BTree::<Table>::new(
+        pager,
+        PageId::FIRST,
+        header.header(|header| PageCtx::from(header)),
+    );
 
     let walker = BTreeWalker::new(&btree);
     let cell = walker.get_cell().unwrap();
 
-    let ctx = header.header(|header| header.into());
-    let c = cell.get(&ctx);
+    // let ctx = header.header(|header| header.into());
+    // let c = cell.get(&ctx);
 }
