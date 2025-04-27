@@ -1,6 +1,9 @@
-use crate::structures::{
-    VarInt,
-    btree::{PageType, TreeKind},
+use crate::{
+    memory::{Chain, MemoryPage, pager::Pager},
+    structures::{
+        VarInt,
+        btree::{PageType, TreeKind},
+    },
 };
 
 use super::{PageCell, PageCtx, Payload};
@@ -10,19 +13,19 @@ pub enum Table {}
 
 impl TreeKind for Table {
     const MASK: u8 = 0b101;
-    type Cell<'p> = TableCell<'p>;
+    type Cell = TableCell;
 }
 
-pub struct TableCell<'p> {
+pub struct TableCell {
     /// Row ID.
     rowid: VarInt,
     /// Payload of the cell, only present on leaf pages.
-    payload: Option<Payload<'p>>,
+    payload: Option<Payload>,
 }
 
-impl<'p> PageCell<'p> for TableCell<'p> {
-    fn from_buffer(ctx: &'_ PageCtx, buf: &'p [u8], page_type: PageType) -> Self {
-        let (length_or_rowid, buf) = VarInt::from_buffer(buf);
+impl PageCell for TableCell {
+    fn from_buffer(ctx: &PageCtx, buf: MemoryPage, page_type: PageType, pager: Pager) -> Self {
+        let (length_or_rowid, buf) = VarInt::from_page(buf);
 
         match page_type {
             PageType::Interior => Self {
@@ -31,9 +34,9 @@ impl<'p> PageCell<'p> for TableCell<'p> {
             },
             PageType::Leaf => {
                 let length = length_or_rowid;
-                let (rowid, buf) = VarInt::from_buffer(buf);
+                let (rowid, buf) = VarInt::from_page(buf);
                 let payload =
-                    Payload::from_buf_with_payload_size::<Table>(ctx, buf, *length as usize);
+                    Payload::from_buf_with_payload_size::<Table>(ctx, buf, *length as usize, pager);
 
                 Self {
                     rowid,
@@ -43,13 +46,7 @@ impl<'p> PageCell<'p> for TableCell<'p> {
         }
     }
 
-    fn get_debug(&self) -> usize {
-        if let Some(payload) = &self.payload {
-            payload.debug();
-        } else {
-            dbg!("no payload :(");
-        }
-
-        *self.rowid as usize
+    fn payload(&self) -> Option<Chain> {
+        Some(self.payload.as_ref()?.data())
     }
 }

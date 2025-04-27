@@ -144,6 +144,18 @@ impl<'p> MemoryPageRef<'p> {
             MemoryPageRefInner::Slice { page, .. } => page.clone(),
         }
     }
+
+    /// Produce a slice of this page.
+    pub fn slice<R: RangeBounds<usize>>(&self, bounds: R) -> Self {
+        Self::new(MemoryPageRefInner::Slice {
+            parent: self.clone(),
+            bounds: (bounds.start_bound().cloned(), bounds.end_bound().cloned()),
+            page: match *self.0 {
+                MemoryPageRefInner::Buffer { page, .. } => page,
+                MemoryPageRefInner::Slice { page, .. } => page,
+            },
+        })
+    }
 }
 
 impl Deref for MemoryPageRef<'_> {

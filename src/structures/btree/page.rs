@@ -7,7 +7,11 @@ use zerocopy::{
     big_endian::{U16, U32},
 };
 
-use crate::{PageId, memory::*, structures::header::SQLITE_HEADER_SIZE};
+use crate::{
+    PageId,
+    memory::{pager::Pager, *},
+    structures::header::SQLITE_HEADER_SIZE,
+};
 
 use super::{
     PageType, TreeKind,
@@ -98,16 +102,12 @@ impl<'r, K: TreeKind> FromMemoryPageRef<'r, &'r Page<K>> for PageContent<'r, K> 
     }
 }
 
-impl<'r, K: TreeKind> PageContent<'r, K> {
-    pub fn get_cell(&self, i: usize) -> K::Cell<'r> {
-        let offset =
-            self.pointer_array[i].get() as usize - self.header.cell_content_offset() as usize;
+impl<K: TreeKind> PageContent<'_, K> {
+    pub fn get_cell(&self, i: usize, pager: Pager) -> K::Cell {
+        let offset = self.pointer_array[i].get() as usize;
+        let buf = self.page_ref.page().slice(offset..);
 
-        K::Cell::from_buffer(
-            self.page_ctx,
-            &self.content_buffer[offset..],
-            self.header.page_type(),
-        )
+        K::Cell::from_buffer(self.page_ctx, buf, self.header.page_type(), pager)
     }
 }
 

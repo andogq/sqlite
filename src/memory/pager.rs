@@ -3,15 +3,31 @@ use std::{
     collections::{HashMap, hash_map::Entry},
     io::{Read, Seek, SeekFrom},
     num::NonZero,
+    rc::Rc,
 };
+
+use derive_more::Deref;
 
 use crate::{
     memory::*,
     structures::header::{SQLITE_HEADER_SIZE, SqliteHeader},
 };
 
+#[derive(Clone, Deref)]
+pub struct Pager(Rc<PagerInner>);
+
+impl Pager {
+    pub fn new(source: impl Source, page_size: usize, page_cache_size: usize) -> Self {
+        Self(Rc::new(PagerInner::new(source, page_size, page_cache_size)))
+    }
+
+    pub fn bootstrap(source: impl Source) -> Result<Self, std::io::Error> {
+        Ok(Self(Rc::new(PagerInner::bootstrap(source)?)))
+    }
+}
+
 /// Produce fixed sized [`MemoryPage`]s from a [`Source`].
-pub struct Pager {
+pub struct PagerInner {
     /// Underlying source where memory will be read from.
     source: RefCell<Box<dyn Source>>,
     /// Page size to use when allocating and reading pages.
@@ -20,7 +36,7 @@ pub struct Pager {
     page_cache: RefCell<HashMap<PageId, MemoryPage>>,
 }
 
-impl Pager {
+impl PagerInner {
     /// Create a new pager with the provided [`Source`], using the specified page size.
     pub fn new(source: impl Source, page_size: usize, page_cache_size: usize) -> Self {
         Self {
