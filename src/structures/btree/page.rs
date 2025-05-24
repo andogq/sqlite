@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, num::NonZero};
 
 use assert_layout::assert_layout;
 use thiserror::Error;
@@ -23,7 +23,7 @@ pub struct Page<K: TreeKind> {
     pub page_id: PageId,
     pub page_ctx: PageCtx,
     pub disk_page: MemoryPage,
-    pub kind: PhantomData<fn() -> K>,
+    kind: PhantomData<fn() -> K>,
 }
 
 impl<K: TreeKind> Page<K> {
@@ -103,11 +103,31 @@ impl<'r, K: TreeKind> FromMemoryPageRef<'r, &'r Page<K>> for PageContent<'r, K> 
 }
 
 impl<K: TreeKind> PageContent<'_, K> {
-    pub fn get_cell(&self, i: usize, pager: Pager) -> K::Cell {
+    pub fn get_cell(&self, i: usize, pager: Pager) -> (Option<PageId>, K::Cell) {
         let offset = self.pointer_array[i].get() as usize;
         let buf = self.page_ref.page().slice(offset..);
 
-        K::Cell::from_buffer(self.page_ctx, buf, self.header.page_type(), pager)
+        let page_type = self.header.page_type();
+
+        let (left_page, buf) = match page_type {
+            PageType::Interior => (
+                Some(PageId::new(
+                    NonZero::new(
+                        U32::ref_from_bytes(&buf.slice(0..4).buffer())
+                            .unwrap()
+                            .get() as usize,
+                    )
+                    .unwrap(),
+                )),
+                buf.slice(4..),
+            ),
+            PageType::Leaf => (None, buf),
+        };
+
+        (
+            left_page,
+            K::Cell::from_buffer(self.page_ctx, buf, page_type, pager),
+        )
     }
 }
 
