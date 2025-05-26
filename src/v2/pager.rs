@@ -1,11 +1,14 @@
 use std::{
+    cell::RefCell,
     io::{Read, Seek, SeekFrom},
     ops::Deref,
+    rc::Rc,
 };
 use zerocopy::big_endian::*;
 
+#[derive(Clone)]
 pub struct Pager {
-    source: Box<dyn Source>,
+    source: Rc<RefCell<Box<dyn Source>>>,
     page_size: u16,
 }
 
@@ -14,7 +17,7 @@ impl Pager {
     /// correct page size based on the header.
     pub fn new(source: impl Source) -> Self {
         let mut pager = Self {
-            source: Box::new(source),
+            source: Rc::new(RefCell::new(Box::new(source))),
             page_size: 0,
         };
 
@@ -25,14 +28,14 @@ impl Pager {
 
     /// Configure this pager using the page size located at `size_offset` in the source.
     fn configure_from_source(&mut self, size_offset: usize) {
+        let mut source = self.source.borrow_mut();
+
         // Position the source in the correct location.
-        self.source
-            .seek(SeekFrom::Start(size_offset as u64))
-            .unwrap();
+        source.seek(SeekFrom::Start(size_offset as u64)).unwrap();
 
         // Read two bytes into a buffer.
         let mut buf = [0; 2];
-        self.source.read_exact(&mut buf).unwrap();
+        source.read_exact(&mut buf).unwrap();
 
         // Deserialise as a u16, and set it as the page size.
         self.page_size = U16::from_bytes(buf).get();
@@ -40,13 +43,21 @@ impl Pager {
 
     /// Read the requested page, and write it to `buf`. It is expected that `buf` is large enough
     /// to hold the entire page, so it should be created with [`Self::new_page_buffer`].
-    pub fn get_page(&mut self, page_id: u32, buf: &mut PageBuffer) {
+    pub fn get_page(&self, page_id: u32, buf: &mut PageBuffer) {
+        assert_eq!(
+            buf.len(),
+            self.page_size as usize,
+            "buffer must match page size"
+        );
+
+        let mut source = self.source.borrow_mut();
+
         // Seek to the correct position.
         let offset = (self.page_size as u32 * page_id) as u64;
-        self.source.seek(SeekFrom::Start(offset)).unwrap();
+        source.seek(SeekFrom::Start(offset)).unwrap();
 
         // Fill the buffer.
-        self.source.read_exact(&mut buf.buffer).unwrap();
+        source.read_exact(&mut buf.buffer).unwrap();
 
         // Fix the buffer's size, if the offset means a full page won't be read (page 0).
         buf.offset = if page_id == 0 {

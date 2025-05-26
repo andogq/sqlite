@@ -24,60 +24,75 @@ use zerocopy::{FromBytes, big_endian::*};
 const DATABASE: &str = "test.db";
 
 trait Scan {
-    fn scan(&self, pager: &mut Pager);
+    type Cell<'a>
+    where
+        Self: 'a;
+
+    fn scan(&self, pager: Pager, f: impl FnMut(Self::Cell<'_>) + Clone);
+}
+
+struct TableCell<'buf> {
+    row_id: i64,
+    payload_length: usize,
+    payload: &'buf [u8],
 }
 
 impl Scan for LeafPage<Table> {
-    fn scan(&self, _pager: &mut Pager) {
+    type Cell<'a> = TableCell<'a>;
+
+    // TODO: Return an iterator over `Self::Cell<'a>` once `Page`s are stored somewhere and
+    // referenced with Rc.
+    fn scan(&self, _pager: Pager, mut f: impl FnMut(Self::Cell<'_>) + Clone) {
         let cell_content = self.cell_content_area();
 
         self.cell_content_pointers()
             .map(|ptr| &cell_content[ptr..])
-            .map(|cell_content| {
+            .for_each(|cell_content| {
                 let (payload_length, cell_content) = VarInt::from_buffer(cell_content);
-                let (row_id, _cell_content) = VarInt::from_buffer(cell_content);
+                let (row_id, payload) = VarInt::from_buffer(cell_content);
 
-                (*row_id, *payload_length)
-            })
-            .for_each(|(row_id, payload_length)| {
-                println!("Found row {row_id} (length: {payload_length})");
+                // TODO: Trim payload and account for overflow
+
+                f(TableCell {
+                    row_id: *row_id,
+                    payload_length: *payload_length as usize,
+                    payload,
+                })
             });
     }
 }
 
 impl Scan for InteriorPage<Table> {
-    fn scan(&self, pager: &mut Pager) {
-        let cell_content = self.cell_content_area();
+    type Cell<'a> = TableCell<'a>;
 
+    fn scan(&self, pager: Pager, f: impl FnMut(Self::Cell<'_>) + Clone) {
         self.cell_content_pointers()
-            .map(|ptr| &cell_content[ptr..])
+            .map({
+                let cell_content = self.cell_content_area();
+                |ptr| &cell_content[ptr..]
+            })
             .map(|cell_content| {
                 let (left_pointer, _cell_content) = U32::read_from_prefix(cell_content).unwrap();
                 left_pointer.get()
             })
             .chain(iter::once(self.right_pointer))
-            .fold(pager.new_page_buffer(), |mut temp_page, page_id| {
-                println!("child page: {page_id}");
-
-                // Load the child page.
-                pager.get_page(page_id, &mut temp_page);
-
-                // Parse out the header.
-                let child_page = Page::<Table>::from_buffer(temp_page);
-
-                // Scan the child page.
-                child_page.scan(pager);
-
-                child_page.into_buffer()
-            });
+            .for_each(move |page_id| {
+                let mut buf = pager.new_page_buffer();
+                pager.get_page(page_id, &mut buf);
+                Page::<Table>::from_buffer(buf).scan(pager.clone(), f.clone())
+            })
     }
 }
 
 impl Scan for Page<Table> {
-    fn scan(&self, pager: &mut Pager) {
+    type Cell<'a> = TableCell<'a>;
+
+    fn scan(&self, pager: Pager, f: impl FnMut(Self::Cell<'_>) + Clone) {
         match self {
-            Page::Leaf(leaf_page) => leaf_page.scan(pager),
-            Page::Interior(interior_page) => interior_page.scan(pager),
+            Page::Leaf(leaf_page) => {
+                leaf_page.scan(pager, f);
+            }
+            Page::Interior(interior_page) => interior_page.scan(pager.clone(), f),
         }
     }
 }
@@ -85,7 +100,7 @@ impl Scan for Page<Table> {
 fn main() {
     let file = File::open(DATABASE).unwrap();
 
-    let mut pager = Pager::new(file);
+    let pager = Pager::new(file);
 
     {
         let mut root_page = pager.new_page_buffer();
@@ -96,7 +111,12 @@ fn main() {
         let page = Page::<Table>::from_buffer(root_page);
         dbg!(page.cell_count);
 
-        page.scan(&mut pager);
+        page.scan(pager, |cell| {
+            println!(
+                "row id: {}, payload length: {}",
+                cell.row_id, cell.payload_length
+            );
+        });
     }
 
     // let pager = Pager::bootstrap(file).unwrap();
