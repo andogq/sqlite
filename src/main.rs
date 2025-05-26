@@ -2,96 +2,15 @@ mod btree;
 mod ctx;
 mod disk;
 
-use std::{fs::File, iter};
+use std::fs::File;
 
 use self::{
-    btree::{
-        page::{Page, PageExt, Table},
-        payload::Payload,
-    },
+    btree::page::{Page, PageExt, Table},
     disk::var_int::VarInt,
 };
 use ctx::Ctx;
-use zerocopy::{FromBytes, big_endian::*};
 
 const DATABASE: &str = "test.db";
-
-fn traverse(ctx: Ctx, page: Page<Table>) -> impl Iterator<Item = TableCell> {
-    let mut stack = vec![page];
-    let mut leaf_iter = None;
-
-    std::iter::from_fn(move || {
-        match &mut leaf_iter {
-            None => {
-                match stack.pop()? {
-                    Page::Leaf(leaf_page) => {
-                        // Buffer all of the pointers into a vec, so they can be referred to from
-                        // the iterator.
-                        let ptrs = leaf_page.cell_content_pointers().collect::<Vec<_>>();
-                        let ctx = ctx.clone();
-
-                        leaf_iter = Some(ptrs.into_iter().map(move |ptr| {
-                            let cell_content = &leaf_page.cell_content_area()[ptr..];
-                            let (payload_size, buf) = VarInt::from_buffer(cell_content);
-                            let (row_id, payload) = VarInt::from_buffer(buf);
-
-                            let payload_offset = ptr + (cell_content.len() - payload.len());
-
-                            // TODO: Trim payload and account for overflow
-
-                            TableCell {
-                                row_id: *row_id,
-                                payload: Payload::from_buf_with_payload_size(
-                                    ctx.clone(),
-                                    leaf_page.clone().to_page(),
-                                    payload_offset,
-                                    *payload_size as usize,
-                                ),
-                            }
-                        }));
-                    }
-                    Page::Interior(interior_page) => {
-                        // Capture the current end of the array, so later pages don't jump ahead.
-                        let insert_point = stack.len();
-
-                        interior_page
-                            .cell_content_pointers()
-                            .map({
-                                let cell_content = interior_page.cell_content_area();
-                                |ptr| &cell_content[ptr..]
-                            })
-                            .map(|cell_content| {
-                                let (left_pointer, _cell_content) =
-                                    U32::read_from_prefix(cell_content).unwrap();
-                                left_pointer.get()
-                            })
-                            .chain(iter::once(interior_page.right_pointer))
-                            .for_each(|ptr| {
-                                stack.insert(
-                                    insert_point,
-                                    Page::from_buffer(ctx.pager.get_page(ptr)),
-                                );
-                            });
-                    }
-                }
-            }
-            Some(iter) => {
-                if let Some(next) = iter.next() {
-                    return Some(Some(next));
-                }
-                leaf_iter = None;
-            }
-        }
-
-        Some(None)
-    })
-    .flatten()
-}
-
-struct TableCell {
-    row_id: i64,
-    payload: Payload<Table>,
-}
 
 fn main() {
     let file = File::open(DATABASE).unwrap();
@@ -104,7 +23,7 @@ fn main() {
         let page = Page::<Table>::from_buffer(root_page);
         dbg!(page.cell_count);
 
-        traverse(ctx.clone(), page).for_each(move |cell| {
+        btree::traverse(ctx.clone(), page).for_each(move |cell| {
             println!(
                 "row id: {}, payload length: {}",
                 cell.row_id, cell.payload.length
