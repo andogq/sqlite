@@ -1,3 +1,4 @@
+use derive_more::{Deref, DerefMut};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -46,23 +47,26 @@ impl Pager {
                 let mut buf = self.0.new_page_buffer();
 
                 // Borrow the source to use it.
-                {
-                    let mut source = self.0.source.borrow_mut();
+                let mut source = self.0.source.borrow_mut();
 
-                    // Seek to the correct position.
-                    let offset = (self.0.page_size as u32 * page_id) as u64;
-                    source.seek(SeekFrom::Start(offset)).unwrap();
+                // Seek to the correct position.
+                let offset = (self.0.page_size as u32 * page_id) as u64;
+                source.seek(SeekFrom::Start(offset)).unwrap();
+
+                {
+                    // Temporarily mutate the buffer whilst there's no other references.
+                    let buf = Rc::get_mut(&mut buf.0).unwrap();
 
                     // Fill the buffer.
                     source.read_exact(&mut buf.buffer).unwrap();
-                }
 
-                // Fix the buffer's size, if the offset means a full page won't be read (page 0).
-                buf.offset = if page_id == 0 {
-                    super::disk::header::SQLITE_HEADER_SIZE
-                } else {
-                    0
-                };
+                    // Fix the buffer's size, if the offset means a full page won't be read (page 0).
+                    buf.offset = if page_id == 0 {
+                        super::disk::header::SQLITE_HEADER_SIZE
+                    } else {
+                        0
+                    };
+                }
 
                 buf
             })
@@ -95,8 +99,11 @@ impl PagerInner {
 pub trait Source: 'static + Read + Seek {}
 impl<T> Source for T where T: 'static + Read + Seek {}
 
-#[derive(Clone, Debug)]
-pub struct PageBuffer {
+#[derive(Clone, Debug, Deref, DerefMut)]
+pub struct PageBuffer(Rc<PageBufferInner>);
+
+#[derive(Debug)]
+pub struct PageBufferInner {
     /// Additional offset to apply to every slice.
     offset: usize,
 
@@ -106,12 +113,14 @@ pub struct PageBuffer {
 
 impl PageBuffer {
     fn new(size: usize) -> Self {
-        Self {
+        Self(Rc::new(PageBufferInner {
             offset: 0,
             buffer: vec![0; size],
-        }
+        }))
     }
+}
 
+impl PageBufferInner {
     /// Produce the full buffer, even if it has an offset applied to it.
     ///
     /// This is useful for processing offsets stored directly within the binary.
@@ -131,7 +140,7 @@ impl PageBuffer {
     }
 }
 
-impl Deref for PageBuffer {
+impl Deref for PageBufferInner {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
