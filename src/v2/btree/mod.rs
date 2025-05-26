@@ -1,4 +1,5 @@
 mod disk;
+pub mod payload;
 
 use std::{marker::PhantomData, num::NonZero, ops::Deref};
 
@@ -7,10 +8,12 @@ use zerocopy::{FromBytes, TryFromBytes, big_endian::*};
 
 use super::pager::PageBuffer;
 
+#[derive(Clone, Debug)]
 pub enum Table {}
+#[derive(Clone, Debug)]
 pub enum Index {}
 
-pub trait PageType {
+pub trait PageType: 'static + Clone {
     const FLAG: u8;
     const INTERIOR_FLAG: u8;
     const LEAF_FLAG: u8;
@@ -43,12 +46,11 @@ impl PageType for Index {
     }
 }
 
-pub trait PageExt {
+pub trait PageExt<T: PageType> {
     /// Create a new page from the provided buffer.
     fn from_buffer(buffer: PageBuffer) -> Self;
 
-    /// Consume the page, and produce the underlying buffer.
-    fn into_buffer(self) -> PageBuffer;
+    fn to_page(self) -> Page<T>;
 }
 
 #[derive(Clone, Debug)]
@@ -57,7 +59,7 @@ pub enum Page<T: PageType> {
     Interior(InteriorPage<T>),
 }
 
-impl<T: PageType> PageExt for Page<T> {
+impl<T: PageType> PageExt<T> for Page<T> {
     fn from_buffer(buffer: PageBuffer) -> Self {
         let flag = PageFlag::new(buffer[0]).expect("valid page flag");
 
@@ -68,11 +70,8 @@ impl<T: PageType> PageExt for Page<T> {
         }
     }
 
-    fn into_buffer(self) -> PageBuffer {
-        match self {
-            Page::Leaf(leaf_page) => leaf_page.into_buffer(),
-            Page::Interior(interior_page) => interior_page.into_buffer(),
-        }
+    fn to_page(self) -> Page<T> {
+        self
     }
 }
 
@@ -239,7 +238,7 @@ pub struct LeafPage<T: PageType> {
     common: PageCommon<T>,
 }
 
-impl<T: PageType> PageExt for LeafPage<T> {
+impl<T: PageType> PageExt<T> for LeafPage<T> {
     fn from_buffer(buffer: PageBuffer) -> Self {
         let (header, _) = disk::DiskLeafPageHeader::try_ref_from_prefix(&buffer[..]).unwrap();
 
@@ -264,8 +263,8 @@ impl<T: PageType> PageExt for LeafPage<T> {
         }
     }
 
-    fn into_buffer(self) -> PageBuffer {
-        self.common.buffer
+    fn to_page(self) -> Page<T> {
+        Page::Leaf(self)
     }
 }
 
@@ -278,7 +277,7 @@ pub struct InteriorPage<T: PageType> {
     pub right_pointer: u32,
 }
 
-impl<T: PageType> PageExt for InteriorPage<T> {
+impl<T: PageType> PageExt<T> for InteriorPage<T> {
     fn from_buffer(buffer: PageBuffer) -> Self {
         let header = disk::DiskInteriorPageHeader::try_ref_from_bytes(&buffer).unwrap();
 
@@ -304,7 +303,7 @@ impl<T: PageType> PageExt for InteriorPage<T> {
         }
     }
 
-    fn into_buffer(self) -> PageBuffer {
-        self.common.buffer
+    fn to_page(self) -> Page<T> {
+        Page::Interior(self)
     }
 }
