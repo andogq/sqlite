@@ -77,8 +77,7 @@ impl Scan for InteriorPage<Table> {
             })
             .chain(iter::once(self.right_pointer))
             .for_each(move |page_id| {
-                let mut buf = pager.new_page_buffer();
-                pager.get_page(page_id, &mut buf);
+                let buf = pager.get_page(page_id);
                 Page::<Table>::from_buffer(buf).scan(pager.clone(), f.clone())
             })
     }
@@ -103,10 +102,8 @@ fn main() {
     let pager = Pager::new(file);
 
     {
-        let mut root_page = pager.new_page_buffer();
-
         // Read the first page into memory.
-        pager.get_page(0, &mut root_page);
+        let root_page = pager.get_page(0);
 
         let page = Page::<Table>::from_buffer(root_page);
         dbg!(page.cell_count);

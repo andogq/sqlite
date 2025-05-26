@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     io::{Read, Seek, SeekFrom},
     ops::Deref,
     rc::Rc,
@@ -7,25 +8,69 @@ use std::{
 use zerocopy::big_endian::*;
 
 #[derive(Clone)]
-pub struct Pager {
-    source: Rc<RefCell<Box<dyn Source>>>,
+pub struct Pager(Rc<PagerInner>);
+
+struct PagerInner {
+    /// Underlying source for this pager.
+    source: RefCell<Box<dyn Source>>,
+
+    /// Configured page size.
     page_size: u16,
+
+    /// Loaded pages.
+    pages: RefCell<HashMap<u32, PageBuffer>>,
 }
 
 impl Pager {
     /// Create a new pager with the provided source. This will configure the pager to use the
     /// correct page size based on the header.
     pub fn new(source: impl Source) -> Self {
-        let mut pager = Self {
-            source: Rc::new(RefCell::new(Box::new(source))),
+        let mut pager = PagerInner {
+            source: RefCell::new(Box::new(source)),
             page_size: 0,
+            pages: RefCell::new(HashMap::new()),
         };
-
         pager.configure_from_source(super::disk::header::PAGE_SIZE_OFFSET);
 
-        pager
+        Self(Rc::new(pager))
     }
 
+    /// Read the requested page, and write it to `buf`. It is expected that `buf` is large enough
+    /// to hold the entire page, so it should be created with [`Self::new_page_buffer`].
+    pub fn get_page(&self, page_id: u32) -> PageBuffer {
+        self.0
+            .pages
+            .borrow_mut()
+            .entry(page_id)
+            .or_insert_with(|| {
+                let mut buf = self.0.new_page_buffer();
+
+                // Borrow the source to use it.
+                {
+                    let mut source = self.0.source.borrow_mut();
+
+                    // Seek to the correct position.
+                    let offset = (self.0.page_size as u32 * page_id) as u64;
+                    source.seek(SeekFrom::Start(offset)).unwrap();
+
+                    // Fill the buffer.
+                    source.read_exact(&mut buf.buffer).unwrap();
+                }
+
+                // Fix the buffer's size, if the offset means a full page won't be read (page 0).
+                buf.offset = if page_id == 0 {
+                    super::disk::header::SQLITE_HEADER_SIZE
+                } else {
+                    0
+                };
+
+                buf
+            })
+            .clone()
+    }
+}
+
+impl PagerInner {
     /// Configure this pager using the page size located at `size_offset` in the source.
     fn configure_from_source(&mut self, size_offset: usize) {
         let mut source = self.source.borrow_mut();
@@ -41,34 +86,8 @@ impl Pager {
         self.page_size = U16::from_bytes(buf).get();
     }
 
-    /// Read the requested page, and write it to `buf`. It is expected that `buf` is large enough
-    /// to hold the entire page, so it should be created with [`Self::new_page_buffer`].
-    pub fn get_page(&self, page_id: u32, buf: &mut PageBuffer) {
-        assert_eq!(
-            buf.len(),
-            self.page_size as usize,
-            "buffer must match page size"
-        );
-
-        let mut source = self.source.borrow_mut();
-
-        // Seek to the correct position.
-        let offset = (self.page_size as u32 * page_id) as u64;
-        source.seek(SeekFrom::Start(offset)).unwrap();
-
-        // Fill the buffer.
-        source.read_exact(&mut buf.buffer).unwrap();
-
-        // Fix the buffer's size, if the offset means a full page won't be read (page 0).
-        buf.offset = if page_id == 0 {
-            super::disk::header::SQLITE_HEADER_SIZE
-        } else {
-            0
-        };
-    }
-
     /// Create a new buffer suitable for holding a page.
-    pub fn new_page_buffer(&self) -> PageBuffer {
+    fn new_page_buffer(&self) -> PageBuffer {
         PageBuffer::new(self.page_size as usize)
     }
 }
