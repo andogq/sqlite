@@ -8,8 +8,10 @@ use zerocopy::{
 };
 
 use crate::{
-    PageId,
-    memory::{pager::Pager, *},
+    memory::{
+        pager::{PageId, Pager},
+        *,
+    },
     structures::header::SQLITE_HEADER_SIZE,
 };
 
