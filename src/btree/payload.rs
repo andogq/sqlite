@@ -3,9 +3,8 @@ use std::cmp::Ordering;
 use zerocopy::{FromBytes, big_endian::U32};
 
 use crate::{
-    DbCtx,
     btree::page::{Index, Page, PageType, Table},
-    pager::Pager,
+    ctx::Ctx,
 };
 
 #[derive(Clone)]
@@ -27,14 +26,14 @@ pub struct Payload<T: PageType> {
 impl<T: PayloadCalculation> Payload<T> {
     /// Read the payload from the start of the provided buffer.
     pub fn from_buf_with_payload_size(
-        ctx: DbCtx,
+        ctx: Ctx,
         page: Page<T>,
         offset: usize,
         payload_size: usize,
     ) -> Self {
         // U: The usable size of a database page (the total page size less the reserved space at
         // the end of each page).
-        let usable_space = ctx.page_size - ctx.page_end_padding;
+        let usable_space = ctx.header.page_size() as usize - ctx.header.page_end_padding() as usize;
 
         // X: The maximum amount of payload that can be stored directly on the b-tree page without
         // spilling onto an overflow page.
@@ -85,7 +84,7 @@ impl<T: PayloadCalculation> Payload<T> {
 
     /// Copy the contents of the payload into the provided buffer. The buffer must be equal to
     /// [`Payload::length`].
-    pub fn copy_to_slice(&self, _pager: Pager, buf: &mut [u8]) {
+    pub fn copy_to_slice(&self, _ctx: Ctx, buf: &mut [u8]) {
         assert_eq!(buf.len(), self.length, "provided buffer must fit payload");
 
         // TODO: Support overflow payloads.

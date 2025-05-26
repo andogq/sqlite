@@ -11,7 +11,7 @@ pub use self::{
     page_type::{Index, PageType, PageTypeFlag, Table},
 };
 
-use crate::pager::PageBuffer;
+use crate::ctx::pager::PageBuffer;
 
 /// Functionality to be implemented by all page representations.
 pub trait PageExt<T: PageType> {

@@ -1,26 +1,22 @@
 mod btree;
+mod ctx;
 mod disk;
-mod pager;
 
-use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom},
-    iter,
-};
+use std::{fs::File, iter};
 
 use self::{
     btree::{
         page::{Page, PageExt, Table},
         payload::Payload,
     },
-    disk::{header::SqliteHeader, var_int::VarInt},
-    pager::Pager,
+    disk::var_int::VarInt,
 };
+use ctx::Ctx;
 use zerocopy::{FromBytes, big_endian::*};
 
 const DATABASE: &str = "test.db";
 
-fn traverse(ctx: DbCtx, page: Page<Table>, pager: Pager) -> impl Iterator<Item = TableCell> {
+fn traverse(ctx: Ctx, page: Page<Table>) -> impl Iterator<Item = TableCell> {
     let mut stack = vec![page];
     let mut leaf_iter = None;
 
@@ -71,7 +67,10 @@ fn traverse(ctx: DbCtx, page: Page<Table>, pager: Pager) -> impl Iterator<Item =
                             })
                             .chain(iter::once(interior_page.right_pointer))
                             .for_each(|ptr| {
-                                stack.insert(insert_point, Page::from_buffer(pager.get_page(ptr)));
+                                stack.insert(
+                                    insert_point,
+                                    Page::from_buffer(ctx.pager.get_page(ptr)),
+                                );
                             });
                     }
                 }
@@ -94,50 +93,25 @@ struct TableCell {
     payload: Payload<Table>,
 }
 
-#[derive(Clone, Debug)]
-struct DbCtx {
-    pub page_size: usize,
-    pub page_end_padding: usize,
-}
-
-impl From<&disk::header::SqliteHeader> for DbCtx {
-    fn from(header: &disk::header::SqliteHeader) -> Self {
-        Self {
-            page_size: header.page_size() as usize,
-            page_end_padding: header.page_end_padding() as usize,
-        }
-    }
-}
-
 fn main() {
-    let mut file = File::open(DATABASE).unwrap();
-
-    let ctx = {
-        let mut header_buf = [0; 100];
-        file.seek(SeekFrom::Start(0)).unwrap();
-        file.read_exact(&mut header_buf).unwrap();
-        let header = SqliteHeader::read_from_buffer(&header_buf).unwrap();
-
-        DbCtx::from(header)
-    };
-
-    let pager = Pager::new(file);
+    let file = File::open(DATABASE).unwrap();
+    let ctx = Ctx::new(file);
 
     {
         // Read the first page into memory.
-        let root_page = pager.get_page(0);
+        let root_page = ctx.pager.get_page(0);
 
         let page = Page::<Table>::from_buffer(root_page);
         dbg!(page.cell_count);
 
-        traverse(ctx, page, pager.clone()).for_each(move |cell| {
+        traverse(ctx.clone(), page).for_each(move |cell| {
             println!(
                 "row id: {}, payload length: {}",
                 cell.row_id, cell.payload.length
             );
 
             let mut payload = vec![0; cell.payload.length];
-            cell.payload.copy_to_slice(pager.clone(), &mut payload);
+            cell.payload.copy_to_slice(ctx.clone(), &mut payload);
 
             let (header_length, buf) = VarInt::from_buffer(&payload);
             let remaining_header = *header_length as usize - (payload.len() - buf.len());

@@ -2,21 +2,22 @@ use derive_more::{Deref, DerefMut};
 use std::{
     cell::RefCell,
     collections::HashMap,
+    fmt::Debug,
     io::{Read, Seek, SeekFrom},
     ops::Deref,
     rc::Rc,
 };
-use zerocopy::big_endian::*;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Pager(Rc<PagerInner>);
 
+#[derive(Debug)]
 struct PagerInner {
     /// Underlying source for this pager.
     source: RefCell<Box<dyn Source>>,
 
     /// Configured page size.
-    page_size: u16,
+    page_size: usize,
 
     /// Loaded pages.
     pages: RefCell<HashMap<u32, PageBuffer>>,
@@ -25,15 +26,12 @@ struct PagerInner {
 impl Pager {
     /// Create a new pager with the provided source. This will configure the pager to use the
     /// correct page size based on the header.
-    pub fn new(source: impl Source) -> Self {
-        let mut pager = PagerInner {
+    pub fn new(source: impl Source, page_size: usize) -> Self {
+        Self(Rc::new(PagerInner {
             source: RefCell::new(Box::new(source)),
-            page_size: 0,
+            page_size,
             pages: RefCell::new(HashMap::new()),
-        };
-        pager.configure_from_source(super::disk::header::PAGE_SIZE_OFFSET);
-
-        Self(Rc::new(pager))
+        }))
     }
 
     /// Read the requested page, and write it to `buf`. It is expected that `buf` is large enough
@@ -62,7 +60,7 @@ impl Pager {
 
                     // Fix the buffer's size, if the offset means a full page won't be read (page 0).
                     buf.offset = if page_id == 0 {
-                        super::disk::header::SQLITE_HEADER_SIZE
+                        crate::disk::header::SQLITE_HEADER_SIZE
                     } else {
                         0
                     };
@@ -75,29 +73,14 @@ impl Pager {
 }
 
 impl PagerInner {
-    /// Configure this pager using the page size located at `size_offset` in the source.
-    fn configure_from_source(&mut self, size_offset: usize) {
-        let mut source = self.source.borrow_mut();
-
-        // Position the source in the correct location.
-        source.seek(SeekFrom::Start(size_offset as u64)).unwrap();
-
-        // Read two bytes into a buffer.
-        let mut buf = [0; 2];
-        source.read_exact(&mut buf).unwrap();
-
-        // Deserialise as a u16, and set it as the page size.
-        self.page_size = U16::from_bytes(buf).get();
-    }
-
     /// Create a new buffer suitable for holding a page.
     fn new_page_buffer(&self) -> PageBuffer {
         PageBuffer::new(self.page_size as usize)
     }
 }
 
-pub trait Source: 'static + Read + Seek {}
-impl<T> Source for T where T: 'static + Read + Seek {}
+pub trait Source: 'static + Read + Seek + Debug {}
+impl<T> Source for T where T: 'static + Read + Seek + Debug {}
 
 #[derive(Clone, Debug, Deref, DerefMut)]
 pub struct PageBuffer(Rc<PageBufferInner>);

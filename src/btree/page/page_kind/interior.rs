@@ -5,7 +5,7 @@ use zerocopy::TryFromBytes;
 
 use crate::{
     btree::page::{Page, PageCommon, PageExt, PageFlag, PageType, disk::DiskInteriorPageHeader},
-    pager::PageBuffer,
+    ctx::pager::PageBuffer,
 };
 
 use super::PageKindFlag;

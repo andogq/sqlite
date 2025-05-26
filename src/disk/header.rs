@@ -1,5 +1,3 @@
-use std::mem::offset_of;
-
 use assert_layout::assert_layout;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
@@ -9,7 +7,6 @@ use super::util::{ConstU8, ConstU8Error};
 
 /// Expected size of the SQLite header in bytes.
 pub const SQLITE_HEADER_SIZE: usize = 100;
-pub const PAGE_SIZE_OFFSET: usize = offset_of!(SqliteHeader, page_size);
 
 /// String expected to be present at the beginning of the header.
 pub const HEADER_STRING: [u8; 16] = *b"SQLite format 3\0";
@@ -94,9 +91,9 @@ pub struct SqliteHeader {
 impl SqliteHeader {
     /// Try read the header from the provided buffer. The buffer must be exactly the correct size
     /// for the header.
-    pub fn read_from_buffer(buf: &[u8]) -> Result<&Self, SqliteHeaderError> {
+    pub fn read_from_buffer(buf: &[u8]) -> Result<Self, SqliteHeaderError> {
         // Read the header.
-        let invalid_header = SqliteHeader::try_ref_from_bytes(buf).map_err(|e| match e {
+        let header = SqliteHeader::try_read_from_bytes(buf).map_err(|e| match e {
             zerocopy::ConvertError::Size(_) => BinaryError::Size,
             zerocopy::ConvertError::Validity(_) => BinaryError::Validity,
             zerocopy::ConvertError::Alignment(_) => {
@@ -105,11 +102,13 @@ impl SqliteHeader {
         })?;
 
         // Validate the header.
-        invalid_header.validate()
+        header.validate()?;
+
+        Ok(header)
     }
 
     /// Validate the current instance of this header.
-    fn validate(&self) -> Result<&SqliteHeader, SqliteHeaderError> {
+    fn validate(&self) -> Result<(), SqliteHeaderError> {
         if self.header_string != HEADER_STRING {
             return Err(SqliteHeaderError::HeaderString(self.header_string));
         }
@@ -173,7 +172,7 @@ impl SqliteHeader {
             return Err(SqliteHeaderError::Reserved(self.reserved));
         }
 
-        Ok(self)
+        Ok(())
     }
 
     /// Get the page size of this database.
