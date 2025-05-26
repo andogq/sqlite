@@ -8,10 +8,6 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, Unaligned};
 pub struct ConstU8<const N: u8>(u8);
 
 impl<const N: u8> ConstU8<N> {
-    pub const fn value() -> u8 {
-        N
-    }
-
     pub fn validate(&self) -> Result<u8, ConstU8Error> {
         if self.0 != N {
             return Err(ConstU8Error {

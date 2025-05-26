@@ -1,7 +1,5 @@
 use derive_more::{Deref, DerefMut};
 
-use crate::memory::MemoryPage;
-
 #[derive(Clone, Copy, Debug, Deref, DerefMut)]
 pub struct VarInt(i64);
 
@@ -22,15 +20,6 @@ impl VarInt {
         }
 
         (Self(value), buf)
-    }
-
-    pub fn from_page(page: MemoryPage) -> (Self, MemoryPage) {
-        let buf = page.buffer();
-        let original_length = buf.len();
-
-        let (value, buf) = Self::from_buffer(&buf);
-
-        (value, page.slice(original_length - buf.len()..))
     }
 
     #[allow(unused)]

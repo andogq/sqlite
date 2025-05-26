@@ -1,45 +1,44 @@
-use std::{cmp::Ordering, num::NonZeroUsize};
+use std::cmp::Ordering;
 
 use zerocopy::{FromBytes, big_endian::U32};
 
 use crate::{
-    memory::{
-        Chain, MemoryPage,
-        pager::{PageId, Pager},
-    },
-    structures::{VarInt, btree::TreeKind},
+    DbCtx,
+    btree::page::{Index, Page, PageType, Table},
+    pager::Pager,
 };
 
-use super::{PageCtx, index::Index, table::Table};
-
 #[derive(Clone)]
-pub struct Payload {
+pub struct Payload<T: PageType> {
     /// Total size of the payload, including any overflow.
-    payload_size: usize,
+    pub length: usize,
 
-    // Chain containing payload data,
-    data: Chain,
+    /// Page that contains the start of the payload.
+    base_page: Page<T>,
+    /// Offset into the cell content area to the beginning of the payload.
+    base_offset: usize,
+    /// End offset (exclusive) of the payload within the base page.
+    base_offset_end: usize,
+
+    /// ID of the next page in the chain.
+    next_page: Option<u32>,
 }
 
-impl Payload {
-    pub fn data(&self) -> Chain {
-        self.data.clone()
-    }
-
+impl<T: PayloadCalculation> Payload<T> {
     /// Read the payload from the start of the provided buffer.
-    pub(super) fn from_buf_with_payload_size<K: PayloadCalculation>(
-        ctx: &PageCtx,
-        buf: MemoryPage,
+    pub fn from_buf_with_payload_size(
+        ctx: DbCtx,
+        page: Page<T>,
+        offset: usize,
         payload_size: usize,
-        pager: Pager,
     ) -> Self {
         // U: The usable size of a database page (the total page size less the reserved space at
         // the end of each page).
-        let usable_space = ctx.page_size as usize - ctx.page_end_padding as usize;
+        let usable_space = ctx.page_size - ctx.page_end_padding;
 
         // X: The maximum amount of payload that can be stored directly on the b-tree page without
         // spilling onto an overflow page.
-        let max_page_payload = K::max_page_payload(usable_space);
+        let max_page_payload = T::max_page_payload(usable_space);
 
         // M: The minimum amount of payload that must be stored onthe btree page before spilling is
         // allowed.
@@ -61,29 +60,44 @@ impl Payload {
             }
         };
 
-        let payload = buf.slice(..stored);
-        let overflow_page = overflow.map(|_| {
-            // Read the overflow page number, which is stored at the end of the usable data.
-            let buf = buf.buffer();
-            let overflow_page = U32::ref_from_bytes(&buf[stored..stored + 4]).unwrap();
+        // Calculate where the payload would stop
+        let base_offset_end = offset + stored;
 
-            PageId::new(NonZeroUsize::new(overflow_page.get() as usize).unwrap())
+        // If overflow, determine the next page.
+        let next_page = overflow.map(|_| {
+            // Read the overflow page number, which is stored at the end of the usable data.
+            let next_page = U32::ref_from_bytes(
+                &page.cell_content_area()[base_offset_end..base_offset_end + size_of::<U32>()],
+            )
+            .unwrap();
+
+            next_page.get()
         });
 
         Self {
-            payload_size,
-            data: Chain::new(pager, payload, overflow_page),
+            length: payload_size,
+            base_page: page,
+            base_offset: offset,
+            base_offset_end,
+            next_page,
         }
     }
 
-    pub(super) fn from_buf<K: PayloadCalculation>(
-        ctx: &PageCtx,
-        buf: MemoryPage,
-        pager: Pager,
-    ) -> Self {
-        let (length, buf) = VarInt::from_page(buf);
+    /// Copy the contents of the payload into the provided buffer. The buffer must be equal to
+    /// [`Payload::length`].
+    pub fn copy_to_slice(&self, _pager: Pager, buf: &mut [u8]) {
+        assert_eq!(buf.len(), self.length, "provided buffer must fit payload");
 
-        Self::from_buf_with_payload_size::<K>(ctx, buf, *length as usize, pager)
+        // TODO: Support overflow payloads.
+        assert!(
+            self.next_page.is_none(),
+            "only support non-overflow payloads for now"
+        );
+
+        // Copy into the slice.
+        buf.copy_from_slice(
+            &self.base_page.cell_content_area()[self.base_offset..self.base_offset_end],
+        );
     }
 
     // pub fn debug(&self) {
@@ -121,7 +135,7 @@ impl Payload {
     // }
 }
 
-pub trait PayloadCalculation: TreeKind {
+pub trait PayloadCalculation: PageType {
     fn max_page_payload(usable_space: usize) -> usize;
 }
 

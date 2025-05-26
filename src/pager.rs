@@ -127,17 +127,6 @@ impl PageBufferInner {
     pub fn raw(&self) -> &[u8] {
         &self.buffer
     }
-
-    /// Update the provided pointer into this buffer, to take into account the offset already
-    /// applied to this buffer.
-    pub fn adjust_with_offset(&self, ptr: usize) -> usize {
-        assert!(
-            ptr >= self.offset,
-            "original pointer must include buffer offset"
-        );
-
-        ptr - self.offset
-    }
 }
 
 impl Deref for PageBufferInner {
