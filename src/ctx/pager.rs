@@ -48,7 +48,7 @@ impl Pager {
                 let mut source = self.0.source.borrow_mut();
 
                 // Seek to the correct position.
-                let offset = (self.0.page_size as u32 * page_id) as u64;
+                let offset = (self.0.page_size as u32 * (page_id - 1)) as u64;
                 source.seek(SeekFrom::Start(offset)).unwrap();
 
                 {
@@ -59,7 +59,7 @@ impl Pager {
                     source.read_exact(&mut buf.buffer).unwrap();
 
                     // Fix the buffer's size, if the offset means a full page won't be read (page 0).
-                    buf.offset = if page_id == 0 {
+                    buf.offset = if page_id == 1 {
                         crate::disk::header::SQLITE_HEADER_SIZE
                     } else {
                         0
@@ -75,7 +75,7 @@ impl Pager {
 impl PagerInner {
     /// Create a new buffer suitable for holding a page.
     fn new_page_buffer(&self) -> PageBuffer {
-        PageBuffer::new(self.page_size as usize)
+        PageBuffer::new(self.page_size)
     }
 }
 

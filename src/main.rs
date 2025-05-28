@@ -1,66 +1,82 @@
 mod btree;
 mod ctx;
 mod disk;
+mod record;
 
 use std::fs::File;
 
-use self::{
-    btree::page::{Page, PageExt, Table},
-    disk::var_int::VarInt,
-};
+use self::btree::page::{Page, PageExt, Table};
 use ctx::Ctx;
+use record::Record;
 
 const DATABASE: &str = "test.db";
+
+#[derive(Clone, Debug)]
+struct DatabaseSchema {
+    r#type: String,
+    name: String,
+    tbl_name: String,
+    root_page: u32,
+    sql: String,
+}
+
+impl From<Record> for DatabaseSchema {
+    fn from(record: Record) -> Self {
+        let mut fields = record.fields.into_iter();
+
+        Self {
+            r#type: fields.next().unwrap().string().unwrap(),
+            name: fields.next().unwrap().string().unwrap(),
+            tbl_name: fields.next().unwrap().string().unwrap(),
+            root_page: fields.next().unwrap().integer().unwrap() as u32,
+            sql: fields.next().unwrap().string().unwrap(),
+        }
+    }
+}
 
 fn main() {
     let file = File::open(DATABASE).unwrap();
     let ctx = Ctx::new(file);
 
-    {
+    let schemas = {
         // Read the first page into memory.
-        let root_page = ctx.pager.get_page(0);
+        let root_page = ctx.pager.get_page(1);
 
         let page = Page::<Table>::from_buffer(root_page);
-        dbg!(page.cell_count);
 
-        btree::traverse(ctx.clone(), page).for_each(move |cell| {
-            println!(
-                "row id: {}, payload length: {}",
-                cell.row_id, cell.payload.length
-            );
-
-            let mut payload = vec![0; cell.payload.length];
-            cell.payload.copy_to_slice(ctx.clone(), &mut payload);
-
-            let (header_length, buf) = VarInt::from_buffer(&payload);
-            let remaining_header = *header_length as usize - (payload.len() - buf.len());
-
-            let mut buf = &buf[..remaining_header];
-
-            while !buf.is_empty() {
-                let (serial_type, rest) = VarInt::from_buffer(buf);
-                buf = rest;
-
+        btree::traverse(ctx.clone(), page)
+            .map(|cell| {
                 println!(
-                    "{}",
-                    match *serial_type {
-                        0 => "NULL",
-                        1 => "i8",
-                        2 => "i16",
-                        3 => "i24",
-                        4 => "i32",
-                        5 => "i48",
-                        6 => "i64",
-                        7 => "f64",
-                        8 => "0",
-                        9 => "1",
-                        10 | 11 => "reserved",
-                        n @ 12.. if n % 2 == 0 => "BLOB",
-                        n @ 13.. if n % 2 == 1 => "text",
-                        _ => unreachable!(),
-                    }
+                    "row id: {}, payload length: {}",
+                    cell.row_id, cell.payload.length
                 );
-            }
-        });
+
+                let mut payload = vec![0; cell.payload.length];
+                cell.payload.copy_to_slice(ctx.clone(), &mut payload);
+
+                DatabaseSchema::from(Record::from_buf(&payload))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for schema in schemas {
+        dbg!(&schema);
+
+        let page = Page::<Table>::from_buffer(ctx.pager.get_page(schema.root_page));
+        btree::traverse(ctx.clone(), page)
+            .map(|cell| {
+                println!(
+                    "row id: {}, payload length: {}",
+                    cell.row_id, cell.payload.length
+                );
+
+                let mut payload = vec![0; cell.payload.length];
+                cell.payload.copy_to_slice(ctx.clone(), &mut payload);
+
+                Record::from_buf(&payload)
+            })
+            .for_each(|record| {
+                dbg!(record);
+            })
     }
 }
