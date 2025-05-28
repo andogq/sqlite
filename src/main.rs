@@ -54,7 +54,7 @@ fn main() {
                 let mut payload = vec![0; cell.payload.length];
                 cell.payload.copy_to_slice(ctx.clone(), &mut payload);
 
-                DatabaseSchema::from(Record::from_buf(&payload))
+                DatabaseSchema::from(Record::from_buf(cell.row_id, &payload))
             })
             .collect::<Vec<_>>()
     };
@@ -73,7 +73,7 @@ fn main() {
                 let mut payload = vec![0; cell.payload.length];
                 cell.payload.copy_to_slice(ctx.clone(), &mut payload);
 
-                Record::from_buf(&payload)
+                Record::from_buf(cell.row_id, &payload)
             })
             .for_each(|record| {
                 dbg!(record);
