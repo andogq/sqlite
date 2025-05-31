@@ -1,4 +1,5 @@
 mod btree;
+mod command;
 mod ctx;
 mod disk;
 mod record;
@@ -79,4 +80,6 @@ fn main() {
                 dbg!(record);
             })
     }
+
+    command::do_something();
 }
