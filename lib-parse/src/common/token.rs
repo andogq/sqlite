@@ -15,12 +15,30 @@ impl Ident {
     }
 }
 
+impl<S: ?Sized + AsRef<str>> PartialEq<S> for Ident {
+    fn eq(&self, other: &S) -> bool {
+        self.0 == other.as_ref()
+    }
+}
+
 /// A punctuation symbol.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Punct {
     Asterisk,
     Comma,
     Semicolon,
+}
+
+impl<S: ?Sized + AsRef<str>> PartialEq<S> for Punct {
+    fn eq(&self, other: &S) -> bool {
+        let c = match self {
+            Punct::Asterisk => "*",
+            Punct::Comma => ",",
+            Punct::Semicolon => ";",
+        };
+
+        c == other.as_ref()
+    }
 }
 
 /// A token comprising of an identifier, or a piece of punctuation. Any whitespace encountered will

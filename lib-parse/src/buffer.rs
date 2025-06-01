@@ -24,11 +24,11 @@ pub trait IntoToken<T> {
 }
 
 /// Blanket implemenation to allow [`BufferToken`]s to convert into themselves.
-impl<T> IntoToken<Self> for T {
-    fn into_token(self) -> Option<Self> {
-        Some(self)
-    }
-}
+// impl<T> IntoToken<Self> for T {
+//     fn into_token(self) -> Option<Self> {
+//         Some(self)
+//     }
+// }
 
 /// Outcome when parsing a [`BufferToken`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -174,6 +174,11 @@ mod test {
             } else {
                 Outcome::Unexpected
             }
+        }
+    }
+    impl<const C: char> IntoToken<Self> for Char<C> {
+        fn into_token(self) -> Option<Self> {
+            Some(self)
         }
     }
 

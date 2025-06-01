@@ -1,5 +1,6 @@
 mod lookahead;
 mod punctuated;
+mod token;
 
 use std::cell::Cell;
 
@@ -33,7 +34,7 @@ where
     BaseToken: Clone + IntoToken<T>,
 {
     fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String> {
-        parser.step(|cursor| cursor.token().ok_or_else(|| "unexpected eof".to_string()))
+        parser.step(|cursor| cursor.token().ok_or_else(|| "unexpected token".to_string()))
     }
 }
 
@@ -144,6 +145,11 @@ mod test {
                 }
             }
         }
+        impl IntoToken<Self> for AOrB {
+            fn into_token(self) -> Option<Self> {
+                Some(self)
+            }
+        }
 
         /// Ensure that the `BaseToken` of the buffer can be directly parsed out.
         #[test]
@@ -173,6 +179,11 @@ mod test {
 
         #[derive(Clone)]
         struct Token;
+        impl IntoToken<Self> for Token {
+            fn into_token(self) -> Option<Self> {
+                Some(self)
+            }
+        }
 
         #[test]
         fn success() {

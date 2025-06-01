@@ -58,13 +58,37 @@ impl<'b, BaseToken> Lookahead<'b, BaseToken> {
 
 #[cfg(test)]
 mod test {
+    use derive_more::From;
+
     use super::*;
+
+    #[derive(Clone, From)]
+    enum BaseToken {
+        Some(SomeToken),
+        Other(OtherToken),
+    }
+    impl IntoToken<SomeToken> for BaseToken {
+        fn into_token(self) -> Option<SomeToken> {
+            match self {
+                Self::Some(some) => Some(some),
+                _ => None,
+            }
+        }
+    }
+    impl IntoToken<OtherToken> for BaseToken {
+        fn into_token(self) -> Option<OtherToken> {
+            match self {
+                Self::Other(other) => Some(other),
+                _ => None,
+            }
+        }
+    }
 
     #[derive(Clone)]
     struct SomeToken;
-    impl Token<SomeToken> for SomeToken {
-        fn peek(cursor: Cursor<'_, SomeToken>) -> bool {
-            cursor.token().is_some()
+    impl Token<BaseToken> for SomeToken {
+        fn peek(cursor: Cursor<'_, BaseToken>) -> bool {
+            cursor.token::<Self>().is_some()
         }
 
         fn display() -> &'static str {
@@ -74,10 +98,10 @@ mod test {
 
     #[derive(Clone)]
     struct OtherToken;
-    impl Token<SomeToken> for OtherToken {
-        fn peek(cursor: Cursor<'_, SomeToken>) -> bool {
+    impl Token<BaseToken> for OtherToken {
+        fn peek(cursor: Cursor<'_, BaseToken>) -> bool {
             // Still advance the cursor for the test, but ignore the result.
-            cursor.token();
+            cursor.token::<Self>();
 
             false
         }
@@ -89,7 +113,7 @@ mod test {
 
     #[test]
     fn can_peek() {
-        let buffer = TokenBuffer::new_with_tokens(vec![SomeToken]);
+        let buffer = TokenBuffer::new_with_tokens(vec![SomeToken.into()]);
         let parser = buffer.parser();
         let mut lookahead = parser.lookahead();
 
@@ -113,7 +137,7 @@ mod test {
 
     #[test]
     fn cant_peek() {
-        let buffer = TokenBuffer::new_with_tokens(vec![SomeToken]);
+        let buffer = TokenBuffer::new_with_tokens(vec![SomeToken.into()]);
         let parser = buffer.parser();
         let mut lookahead = parser.lookahead();
 
