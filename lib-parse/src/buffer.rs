@@ -18,13 +18,13 @@ pub trait BufferToken: Clone + Sized {
 
 /// Helper trait for converting between different token types. This is useful for downcasting from
 /// an enum of token types, into one specific token variant.
-pub trait IntoToken<T>: BufferToken {
+pub trait IntoToken<T> {
     /// Consume the token, and produce a new representation of this token.
     fn into_token(self) -> Option<T>;
 }
 
 /// Blanket implemenation to allow [`BufferToken`]s to convert into themselves.
-impl<T: BufferToken> IntoToken<Self> for T {
+impl<T> IntoToken<Self> for T {
     fn into_token(self) -> Option<Self> {
         Some(self)
     }
@@ -66,8 +66,8 @@ impl<BaseToken> TokenBuffer<BaseToken> {
     {
         let mut chars = source.chars().peekable();
 
-        Ok(TokenBuffer {
-            buffer: iter::from_fn(move || {
+        Ok(Self::new_with_tokens(
+            iter::from_fn(move || {
                 let c = chars.next()?;
 
                 match BaseToken::from_char(c, &mut chars) {
@@ -77,9 +77,15 @@ impl<BaseToken> TokenBuffer<BaseToken> {
                 }
             })
             .flatten()
-            .collect::<Result<Vec<_>, _>>()?
-            .into_boxed_slice(),
-        })
+            .collect::<Result<Vec<_>, _>>()?,
+        ))
+    }
+
+    /// Create a new buffer with the provided tokens.
+    pub(crate) fn new_with_tokens(tokens: Vec<BaseToken>) -> Self {
+        Self {
+            buffer: tokens.into_boxed_slice(),
+        }
     }
 
     /// Create an empty [`TokenBuffer`].
@@ -143,10 +149,10 @@ impl<'b, BaseToken> Cursor<'b, BaseToken> {
         self.offset >= self.buffer.len()
     }
 
-    /// If the next token matches `U`, return it along with an advanced cursor.
+    /// If the next token matches `T`, return it along with an advanced cursor.
     pub fn token<T>(self) -> Option<(T, Self)>
     where
-        BaseToken: IntoToken<T>,
+        BaseToken: Clone + IntoToken<T>,
     {
         Some((self.entry()?.clone().into_token()?, self.next_cursor()))
     }

@@ -5,7 +5,7 @@ use std::cell::Cell;
 
 pub use self::lookahead::Lookahead;
 
-use crate::buffer::{BufferToken, Cursor, TokenBuffer};
+use crate::buffer::{BufferToken, Cursor, IntoToken, TokenBuffer};
 
 /// All available entrypoints for parsing.
 pub mod entrypoint {
@@ -24,6 +24,17 @@ pub mod entrypoint {
 pub trait Parse<BaseToken>: Sized {
     /// Parse a value with the provided parser.
     fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String>;
+}
+
+/// Blanket implementation allowing any type `T` to be parsed from `BaseToken` if there is an
+/// implementation of `IntoToken<T>` for `BaseToken`.
+impl<T, BaseToken> Parse<BaseToken> for T
+where
+    BaseToken: Clone + IntoToken<T>,
+{
+    fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String> {
+        parser.step(|cursor| cursor.token().ok_or_else(|| "unexpected eof".to_string()))
+    }
 }
 
 /// A value which represents a single `BaseToken`.
@@ -81,6 +92,7 @@ impl<'b, BaseToken> FullBufferParser<'b, BaseToken> {
         Ok(result)
     }
 
+    /// Begin a lookahead from this position in the buffer.
     pub fn lookahead(&self) -> Lookahead<'b, BaseToken> {
         Lookahead::new(self.cursor())
     }
@@ -93,5 +105,95 @@ impl<'b, BaseToken> FullBufferParser<'b, BaseToken> {
     /// Provide a copy of the current [`Cursor`].
     fn cursor(&self) -> Cursor<'b, BaseToken> {
         self.cursor.get()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    mod parse {
+        use derive_more::From;
+
+        use super::*;
+
+        use crate::buffer::IntoToken;
+
+        #[derive(Clone)]
+        struct A;
+        #[derive(Clone)]
+        struct B;
+        #[derive(Clone, From)]
+        enum AOrB {
+            A(A),
+            B(B),
+        }
+        impl IntoToken<A> for AOrB {
+            fn into_token(self) -> Option<A> {
+                match self {
+                    Self::A(a) => Some(a),
+                    _ => None,
+                }
+            }
+        }
+        impl IntoToken<B> for AOrB {
+            fn into_token(self) -> Option<B> {
+                match self {
+                    Self::B(b) => Some(b),
+                    _ => None,
+                }
+            }
+        }
+
+        /// Ensure that the `BaseToken` of the buffer can be directly parsed out.
+        #[test]
+        fn base_token() {
+            let buffer = TokenBuffer::<AOrB>::new_with_tokens(vec![A.into()]);
+            let parser = buffer.parser();
+
+            let _a_or_b: AOrB = parser.parse().unwrap();
+            assert!(parser.is_empty());
+        }
+
+        /// Ensure that any implementations of `IntoToken` supported by `BaseToken` can be directly
+        /// parsed out.
+        #[test]
+        fn into_token() {
+            let buffer = TokenBuffer::<AOrB>::new_with_tokens(vec![A.into(), B.into()]);
+            let parser = buffer.parser();
+
+            let _a: A = parser.parse().unwrap();
+            let _b: B = parser.parse().unwrap();
+            assert!(parser.is_empty());
+        }
+    }
+
+    mod step {
+        use super::*;
+
+        #[derive(Clone)]
+        struct Token;
+
+        #[test]
+        fn success() {
+            let buffer = TokenBuffer::new_with_tokens(vec![Token]);
+            let parser = buffer.parser();
+
+            assert!(!parser.is_empty());
+            let _token = parser.step(|cursor| Ok(cursor.token().unwrap())).unwrap();
+            assert!(parser.is_empty());
+        }
+
+        #[test]
+        fn fail() {
+            let buffer = TokenBuffer::new_with_tokens(vec![Token]);
+            let parser = buffer.parser();
+
+            assert!(!parser.is_empty());
+            parser
+                .step::<()>(|_cursor| Err("some error".into()))
+                .unwrap_err();
+            assert!(!parser.is_empty());
+        }
     }
 }
