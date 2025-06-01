@@ -2,7 +2,7 @@ use std::iter::{self, Peekable};
 
 use derive_more::{Deref, From};
 
-use crate::buffer::{BufferToken, Outcome};
+use crate::buffer::{BufferToken, IntoToken, Outcome};
 
 /// An identifier. Can begin with any letter or an underscore, and can contain any letter, number,
 /// or underscore.
@@ -15,22 +15,6 @@ impl Ident {
     }
 }
 
-impl BufferToken for Ident {
-    fn from_char(c: char, chars: &mut Peekable<impl Iterator<Item = char>>) -> Outcome<Self> {
-        if !(c.is_alphabetic() || c == '_') {
-            return Outcome::Unexpected;
-        }
-
-        let ident = iter::once(c)
-            .chain(crate::util::take_while(chars, |c| {
-                c.is_alphanumeric() || *c == '_'
-            }))
-            .collect::<String>();
-
-        Outcome::Token(Self(ident))
-    }
-}
-
 /// A punctuation symbol.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Punct {
@@ -39,18 +23,8 @@ pub enum Punct {
     Semicolon,
 }
 
-impl BufferToken for Punct {
-    fn from_char(c: char, _chars: &mut Peekable<impl Iterator<Item = char>>) -> Outcome<Self> {
-        Outcome::Token(match c {
-            '*' => Self::Asterisk,
-            ',' => Self::Comma,
-            ';' => Self::Semicolon,
-            _ => return Outcome::Unexpected,
-        })
-    }
-}
-
-/// Combination of all common tokens.
+/// A token comprising of an identifier, or a piece of punctuation. Any whitespace encountered will
+/// be ignored.
 #[derive(Clone, Debug, From, PartialEq)]
 pub enum CommonToken {
     Ident(Ident),
@@ -60,10 +34,44 @@ pub enum CommonToken {
 impl BufferToken for CommonToken {
     fn from_char(c: char, chars: &mut Peekable<impl Iterator<Item = char>>) -> Outcome<Self> {
         match c {
-            c @ ('a'..='z' | 'A'..='Z' | '_') => Ident::from_char(c, chars).map(CommonToken::Ident),
-            c if c.is_ascii_punctuation() => Punct::from_char(c, chars).map(CommonToken::Punct),
+            c @ ('a'..='z' | 'A'..='Z' | '_') => {
+                let ident = iter::once(c)
+                    .chain(crate::util::take_while(chars, |c| {
+                        c.is_alphanumeric() || *c == '_'
+                    }))
+                    .collect::<String>();
+
+                Outcome::Token(Ident::new(ident).into())
+            }
+            c if c.is_ascii_punctuation() => Outcome::Token(
+                match c {
+                    '*' => Punct::Asterisk,
+                    ',' => Punct::Comma,
+                    ';' => Punct::Semicolon,
+                    _ => return Outcome::Unexpected,
+                }
+                .into(),
+            ),
             c if c.is_whitespace() => Outcome::Skip,
             _ => Outcome::Unexpected,
+        }
+    }
+}
+
+impl IntoToken<Ident> for CommonToken {
+    fn into_token(self) -> Option<Ident> {
+        match self {
+            Self::Ident(ident) => Some(ident),
+            _ => None,
+        }
+    }
+}
+
+impl IntoToken<Punct> for CommonToken {
+    fn into_token(self) -> Option<Punct> {
+        match self {
+            Self::Punct(punct) => Some(punct),
+            _ => None,
         }
     }
 }
@@ -103,62 +111,19 @@ mod test {
         assert!(matches!(T::from_char(c, &mut chars), Outcome::Skip));
     }
 
-    mod ident {
-        use super::*;
-
-        #[rstest]
-        #[case("a")]
-        #[case("_")]
-        #[case("abc")]
-        #[case("_abc")]
-        #[case("abc_abc")]
-        #[case("abc123")]
-        fn valid(#[case] ident: &'static str) {
-            let token = parse_token::<Ident>(ident);
-            assert_eq!(*token, ident);
-        }
-
-        #[rstest]
-        #[case("1")]
-        #[case("!")]
-        #[case("1abc")]
-        #[case("!abc")]
-        #[case(" abc")]
-        fn unexpected(#[case] ident: &'static str) {
-            parse_unexpected::<Ident>(ident);
-        }
-    }
-
-    mod punct {
-        use super::*;
-
-        #[rstest]
-        #[case("*", Punct::Asterisk)]
-        #[case(",", Punct::Comma)]
-        #[case(";", Punct::Semicolon)]
-        fn valid(#[case] punct: &'static str, #[case] expected: Punct) {
-            let token = parse_token::<Punct>(punct);
-            assert_eq!(token, expected);
-        }
-
-        #[rstest]
-        #[case(" ")]
-        #[case("1")]
-        #[case("a")]
-        #[case("a*")]
-        fn unexpected(#[case] punct: &'static str) {
-            parse_unexpected::<Punct>(punct);
-        }
-    }
-
     mod common_token {
         use super::*;
 
         #[rstest]
+        #[case("a", Ident::new("a").into())]
+        #[case("_", Ident::new("_").into())]
         #[case("abc", Ident::new("abc").into())]
         #[case("_abc", Ident::new("_abc").into())]
+        #[case("abc_abc", Ident::new("abc_abc").into())]
         #[case("abc123", Ident::new("abc123").into())]
         #[case("*", Punct::Asterisk.into())]
+        #[case(",", Punct::Comma.into())]
+        #[case(";", Punct::Semicolon.into())]
         fn valid(#[case] token: &'static str, #[case] expected: CommonToken) {
             let token = parse_token::<CommonToken>(token);
             assert_eq!(token, expected);
@@ -166,7 +131,9 @@ mod test {
 
         #[rstest]
         #[case("!")]
-        #[case("123")]
+        #[case("1")]
+        #[case("1abc")]
+        #[case("!abc")]
         fn unexpected(#[case] token: &'static str) {
             parse_unexpected::<CommonToken>(token);
         }
@@ -175,6 +142,7 @@ mod test {
         #[case(" ")]
         #[case("\t")]
         #[case("\n")]
+        #[case(" abc")]
         fn skip(#[case] token: &'static str) {
             parse_skip::<CommonToken>(token);
         }
