@@ -3,15 +3,25 @@ name = "sqlite"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+resolver = "3"
+members = ["lib-parse"]
+
+[workspace.dependencies]
+derive_more = { version = "2.0.1", features = [
+    "deref",
+    "deref_mut",
+    "from",
+    "try_from",
+] }
+rstest = "0.25.0"
+
+
 [dependencies]
 anyhow = "1.0.97"
 assert_layout = "0.0.1"
 derive-where = "1.2.7"
-derive_more = { version = "2.0.1", features = [
-    "deref",
-    "deref_mut",
-    "try_from",
-] }
+derive_more.workspace = true
 num_enum = "0.7.3"
 static_assertions = "1.1.0"
 thiserror = "2.0.12"
@@ -19,4 +29,4 @@ ux = { version = "0.1.6", features = ["std"] }
 zerocopy = { version = "0.8.21", features = ["std", "derive"] }
 
 [dev-dependencies]
-rstest = "0.25.0"
+rstest.workspace = true
