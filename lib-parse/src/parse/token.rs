@@ -41,28 +41,31 @@ macro_rules! define_tokens {
                 const TOKEN: &'static str = ::std::stringify!($token);
             }
 
-            // 1-deep nesting: parent token into child token
-            impl $crate::buffer::IntoToken<$name> for $repr where for<'s> $repr: ::std::cmp::PartialEq<&'s str> {
-                fn into_token(self) -> ::std::option::Option<$name> {
-                    if self == $name::TOKEN {
-                        ::std::option::Option::Some($name)
+            impl<BaseToken> $crate::parse::Parse<BaseToken> for $name
+            where
+                for<'s> $repr: $crate::parse::Parse<BaseToken> + ::std::cmp::PartialEq<&'s str>
+            {
+                fn parse(parser: $crate::parse::BufferParser<'_, BaseToken>) -> Result<Self, String> {
+                    let repr = parser.parse::<$repr>()?;
+                    if repr == Self::TOKEN {
+                        ::std::result::Result::Ok($name)
                     } else {
-                        ::std::option::Option::None
+                        ::std::result::Result::Err(format!("expected `{}`", Self::TOKEN))
                     }
                 }
             }
 
-            // 2-deep nesting: grand-parent token into child token (via parent)
-            impl<BaseToken> $crate::buffer::IntoToken<$name> for BaseToken where BaseToken: IntoToken<$repr> {
-                fn into_token(self) -> ::std::option::Option<$name> {
-                    let parent = self.into_token()?;
-                    parent.into_token()
-                }
-            }
-
-            impl<BaseToken> $crate::parse::Token<BaseToken> for $name where BaseToken: ::std::clone::Clone + $crate::buffer::IntoToken<Self> {
+            impl<BaseToken> $crate::parse::Token<BaseToken> for $name
+            where
+                $repr: $crate::parse::token::TokenRepr<BaseToken>,
+                BaseToken: ::std::clone::Clone
+            {
                 fn peek(cursor: $crate::buffer::Cursor<'_, BaseToken>) -> bool {
-                    cursor.token::<$name>().is_some()
+                    let Some((base, _)) = cursor.token() else {
+                        return false;
+                    };
+
+                    <$repr as $crate::parse::token::TokenRepr<BaseToken>>::from_base(base).is_some()
                 }
 
                 fn display() -> &'static str {
@@ -96,17 +99,38 @@ macro_rules! define_tokens {
     };
 }
 
+/// Helper trait to allow for conversion from some `BaseToken` into a value used as a
+/// representation for tokens. Any types used as representation in the [`define_tokens`] macro must
+/// implement this trait, as it allows the macro to automatically generated certain method
+/// implementations.
+pub trait TokenRepr<BaseToken>: Sized {
+    /// Create this token from a base token, or returning `None` if it fails.
+    ///
+    /// For most base tokens which are an enum, this will just a be a match statement.
+    fn from_base(base: BaseToken) -> Option<Self>;
+}
+
 #[cfg(test)]
 mod test {
     use derive_more::From;
 
-    use crate::buffer::{IntoToken, TokenBuffer};
+    use crate::{
+        buffer::TokenBuffer,
+        parse::{BufferParser, Parse},
+    };
+
+    use super::*;
 
     #[derive(Clone)]
     struct Ident(String);
     impl<S: ?Sized + AsRef<str>> PartialEq<S> for Ident {
         fn eq(&self, other: &S) -> bool {
             self.0 == other.as_ref()
+        }
+    }
+    impl Parse<BaseToken> for Ident {
+        fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String> {
+            Self::from_base(parser.parse::<BaseToken>()?).ok_or_else(|| "expected `ident`".into())
         }
     }
     #[derive(Clone)]
@@ -116,23 +140,28 @@ mod test {
             self.0 == other.as_ref()
         }
     }
+    impl Parse<BaseToken> for Symbol {
+        fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String> {
+            Self::from_base(parser.parse::<BaseToken>()?).ok_or_else(|| "expected `symbol`".into())
+        }
+    }
 
     #[derive(Clone, From)]
     enum BaseToken {
         Ident(Ident),
         Symbol(Symbol),
     }
-    impl IntoToken<Ident> for BaseToken {
-        fn into_token(self) -> Option<Ident> {
-            match self {
+    impl TokenRepr<BaseToken> for Ident {
+        fn from_base(base: BaseToken) -> Option<Self> {
+            match base {
                 BaseToken::Ident(ident) => Some(ident),
                 _ => None,
             }
         }
     }
-    impl IntoToken<Symbol> for BaseToken {
-        fn into_token(self) -> Option<Symbol> {
-            match self {
+    impl TokenRepr<BaseToken> for Symbol {
+        fn from_base(base: BaseToken) -> Option<Self> {
+            match base {
                 BaseToken::Symbol(symbol) => Some(symbol),
                 _ => None,
             }

@@ -130,27 +130,33 @@ mod test {
     }
     #[derive(Clone)]
     struct Value;
-    #[derive(Clone)]
-    struct Delimiter;
-    impl IntoToken<Value> for BaseToken {
-        fn into_token(self) -> Option<Value> {
-            match self {
-                Self::Value => Some(Value),
-                _ => None,
+    impl Parse<BaseToken> for Value {
+        fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String> {
+            match parser.parse()? {
+                BaseToken::Value => Ok(Value),
+                _ => Err("expected `value`".into()),
             }
         }
     }
-    impl IntoToken<Delimiter> for BaseToken {
-        fn into_token(self) -> Option<Delimiter> {
-            match self {
-                Self::Delimiter => Some(Delimiter),
-                _ => None,
+    #[derive(Clone)]
+    struct Delimiter;
+    impl Parse<BaseToken> for Delimiter {
+        fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String> {
+            match parser.parse()? {
+                BaseToken::Delimiter => Ok(Delimiter),
+                _ => Err("expected `delimiter`".into()),
             }
         }
     }
     impl Token<BaseToken> for Delimiter {
         fn peek(cursor: Cursor<'_, BaseToken>) -> bool {
-            cursor.token::<Delimiter>().is_some()
+            let Some((token, _)) = cursor.token() else {
+                return false;
+            };
+            match token {
+                BaseToken::Delimiter => true,
+                _ => false,
+            }
         }
 
         fn display() -> &'static str {

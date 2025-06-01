@@ -6,7 +6,7 @@ use std::cell::Cell;
 
 pub use self::lookahead::Lookahead;
 
-use crate::buffer::{BufferToken, Cursor, IntoToken, TokenBuffer};
+use crate::buffer::{BufferToken, Cursor, TokenBuffer};
 
 /// All available entrypoints for parsing.
 pub mod entrypoint {
@@ -27,13 +27,11 @@ pub trait Parse<BaseToken>: Sized {
     fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String>;
 }
 
-/// Blanket implementation allowing any type `T` to be parsed from `BaseToken` if there is an
-/// implementation of `IntoToken<T>` for `BaseToken`.
-impl<T, BaseToken> Parse<BaseToken> for T
+impl<T> Parse<T> for T
 where
-    BaseToken: Clone + IntoToken<T>,
+    T: Clone,
 {
-    fn parse(parser: BufferParser<'_, BaseToken>) -> Result<Self, String> {
+    fn parse(parser: BufferParser<'_, T>) -> Result<Self, String> {
         parser.step(|cursor| cursor.token().ok_or_else(|| "unexpected token".to_string()))
     }
 }
@@ -118,8 +116,6 @@ mod test {
 
         use super::*;
 
-        use crate::buffer::IntoToken;
-
         #[derive(Clone)]
         struct A;
         #[derive(Clone)]
@@ -129,25 +125,21 @@ mod test {
             A(A),
             B(B),
         }
-        impl IntoToken<A> for AOrB {
-            fn into_token(self) -> Option<A> {
-                match self {
-                    Self::A(a) => Some(a),
-                    _ => None,
+
+        impl Parse<AOrB> for A {
+            fn parse(parser: BufferParser<'_, AOrB>) -> Result<Self, String> {
+                match parser.parse()? {
+                    AOrB::A(a) => Ok(a),
+                    _ => Err("expected `a`".into()),
                 }
             }
         }
-        impl IntoToken<B> for AOrB {
-            fn into_token(self) -> Option<B> {
-                match self {
-                    Self::B(b) => Some(b),
-                    _ => None,
+        impl Parse<AOrB> for B {
+            fn parse(parser: BufferParser<'_, AOrB>) -> Result<Self, String> {
+                match parser.parse()? {
+                    AOrB::B(b) => Ok(b),
+                    _ => Err("expected `b`".into()),
                 }
-            }
-        }
-        impl IntoToken<Self> for AOrB {
-            fn into_token(self) -> Option<Self> {
-                Some(self)
             }
         }
 
@@ -179,11 +171,6 @@ mod test {
 
         #[derive(Clone)]
         struct Token;
-        impl IntoToken<Self> for Token {
-            fn into_token(self) -> Option<Self> {
-                Some(self)
-            }
-        }
 
         #[test]
         fn success() {

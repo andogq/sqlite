@@ -67,28 +67,19 @@ mod test {
         Some(SomeToken),
         Other(OtherToken),
     }
-    impl IntoToken<SomeToken> for BaseToken {
-        fn into_token(self) -> Option<SomeToken> {
-            match self {
-                Self::Some(some) => Some(some),
-                _ => None,
-            }
-        }
-    }
-    impl IntoToken<OtherToken> for BaseToken {
-        fn into_token(self) -> Option<OtherToken> {
-            match self {
-                Self::Other(other) => Some(other),
-                _ => None,
-            }
-        }
-    }
 
     #[derive(Clone)]
     struct SomeToken;
     impl Token<BaseToken> for SomeToken {
         fn peek(cursor: Cursor<'_, BaseToken>) -> bool {
-            cursor.token::<Self>().is_some()
+            let Some((token, _)) = cursor.token() else {
+                return false;
+            };
+
+            match token {
+                BaseToken::Some(_) => true,
+                _ => false,
+            }
         }
 
         fn display() -> &'static str {
@@ -100,10 +91,14 @@ mod test {
     struct OtherToken;
     impl Token<BaseToken> for OtherToken {
         fn peek(cursor: Cursor<'_, BaseToken>) -> bool {
-            // Still advance the cursor for the test, but ignore the result.
-            cursor.token::<Self>();
+            let Some((token, _)) = cursor.token() else {
+                return false;
+            };
 
-            false
+            match token {
+                BaseToken::Other(_) => true,
+                _ => false,
+            }
         }
 
         fn display() -> &'static str {

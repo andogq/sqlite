@@ -2,7 +2,10 @@ use std::iter::{self, Peekable};
 
 use derive_more::{Deref, From};
 
-use crate::buffer::{BufferToken, IntoToken, Outcome};
+use crate::{
+    buffer::{BufferToken, Outcome},
+    parse::{BufferParser, Parse},
+};
 
 /// An identifier. Can begin with any letter or an underscore, and can contain any letter, number,
 /// or underscore.
@@ -18,6 +21,15 @@ impl Ident {
 impl<S: ?Sized + AsRef<str>> PartialEq<S> for Ident {
     fn eq(&self, other: &S) -> bool {
         self.0 == other.as_ref()
+    }
+}
+
+impl Parse<CommonToken> for Ident {
+    fn parse(parser: BufferParser<'_, CommonToken>) -> Result<Self, String> {
+        match parser.parse()? {
+            CommonToken::Ident(ident) => Ok(ident),
+            _ => Err("unexpected token (expected ident)".into()),
+        }
     }
 }
 
@@ -38,6 +50,15 @@ impl<S: ?Sized + AsRef<str>> PartialEq<S> for Punct {
         };
 
         c == other.as_ref()
+    }
+}
+
+impl Parse<CommonToken> for Punct {
+    fn parse(parser: BufferParser<'_, CommonToken>) -> Result<Self, String> {
+        match parser.parse()? {
+            CommonToken::Punct(punct) => Ok(punct),
+            _ => Err("unexpected token (expected punct)".into()),
+        }
     }
 }
 
@@ -72,24 +93,6 @@ impl BufferToken for CommonToken {
             ),
             c if c.is_whitespace() => Outcome::Skip,
             _ => Outcome::Unexpected,
-        }
-    }
-}
-
-impl IntoToken<Ident> for CommonToken {
-    fn into_token(self) -> Option<Ident> {
-        match self {
-            Self::Ident(ident) => Some(ident),
-            _ => None,
-        }
-    }
-}
-
-impl IntoToken<Punct> for CommonToken {
-    fn into_token(self) -> Option<Punct> {
-        match self {
-            Self::Punct(punct) => Some(punct),
-            _ => None,
         }
     }
 }

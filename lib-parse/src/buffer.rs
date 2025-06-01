@@ -16,20 +16,6 @@ pub trait BufferToken: Clone + Sized {
     fn from_char(c: char, chars: &mut Peekable<impl Iterator<Item = char>>) -> Outcome<Self>;
 }
 
-/// Helper trait for converting between different token types. This is useful for downcasting from
-/// an enum of token types, into one specific token variant.
-pub trait IntoToken<T> {
-    /// Consume the token, and produce a new representation of this token.
-    fn into_token(self) -> Option<T>;
-}
-
-/// Blanket implemenation to allow [`BufferToken`]s to convert into themselves.
-// impl<T> IntoToken<Self> for T {
-//     fn into_token(self) -> Option<Self> {
-//         Some(self)
-//     }
-// }
-
 /// Outcome when parsing a [`BufferToken`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome<T: Sized> {
@@ -150,11 +136,11 @@ impl<'b, BaseToken> Cursor<'b, BaseToken> {
     }
 
     /// If the next token matches `T`, return it along with an advanced cursor.
-    pub fn token<T>(self) -> Option<(T, Self)>
+    pub fn token(self) -> Option<(BaseToken, Self)>
     where
-        BaseToken: Clone + IntoToken<T>,
+        BaseToken: Clone,
     {
-        Some((self.entry()?.clone().into_token()?, self.next_cursor()))
+        Some((self.entry()?.clone(), self.next_cursor()))
     }
 }
 
@@ -176,11 +162,6 @@ mod test {
             }
         }
     }
-    impl<const C: char> IntoToken<Self> for Char<C> {
-        fn into_token(self) -> Option<Self> {
-            Some(self)
-        }
-    }
 
     /// Token which will skip a character during parsing.
     #[derive(Clone)]
@@ -192,34 +173,6 @@ mod test {
             }
 
             T::from_char(c, chars).map(Self)
-        }
-    }
-
-    /// Token which maybe `C`, or any other character.
-    #[derive(Clone)]
-    enum Maybe<const C: char> {
-        C,
-        Other(char),
-    }
-    impl<const C: char> BufferToken for Maybe<C> {
-        fn from_char(c: char, _chars: &mut Peekable<impl Iterator<Item = char>>) -> Outcome<Self> {
-            Outcome::Token(if c == C { Self::C } else { Self::Other(c) })
-        }
-    }
-    impl<const C: char> IntoToken<Char<C>> for Maybe<C> {
-        fn into_token(self) -> Option<Char<C>> {
-            match self {
-                Maybe::C => Some(Char),
-                _ => None,
-            }
-        }
-    }
-    impl<const C: char> IntoToken<char> for Maybe<C> {
-        fn into_token(self) -> Option<char> {
-            match self {
-                Maybe::Other(c) => Some(c),
-                _ => None,
-            }
         }
     }
 
@@ -316,22 +269,6 @@ mod test {
                 let (_token, cursor) = cursor.token().unwrap();
                 assert_eq!(cursor.offset, 1);
                 assert!(cursor.eof())
-            }
-
-            #[test]
-            fn into_token() {
-                let buffer = TokenBuffer::<Maybe<'a'>>::new("ab").unwrap();
-                let cursor = buffer.cursor();
-                assert_eq!(cursor.offset, 0);
-
-                let (_token, cursor): (A, _) = cursor.token().unwrap();
-                assert_eq!(cursor.offset, 1);
-
-                assert!(cursor.clone().token::<A>().is_none());
-
-                let (token, cursor): (char, _) = cursor.token().unwrap();
-                assert_eq!(cursor.offset, 2);
-                assert_eq!(token, 'b');
             }
         }
     }
