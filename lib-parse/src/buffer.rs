@@ -8,6 +8,8 @@ use std::iter::{self, Peekable};
 
 use derive_more::Deref;
 
+use crate::parse::FullBufferParser;
+
 /// A low level token, which is directly constructed from at least one character.
 pub trait BufferToken: Clone + Sized {
     /// Create a new token from a [`char`], and an iterator of additional [`char`]s.
@@ -51,21 +53,24 @@ impl<T: Sized> Outcome<T> {
 
 /// Buffered stream of tokens.
 #[derive(Deref)]
-pub struct TokenBuffer<T> {
+pub struct TokenBuffer<BaseToken> {
     /// Underlying buffer containing all tokens.
-    buffer: Box<[T]>,
+    buffer: Box<[BaseToken]>,
 }
 
-impl<T: BufferToken> TokenBuffer<T> {
+impl<BaseToken> TokenBuffer<BaseToken> {
     /// Tokenise the source, and produce a new [`TokenBuffer`].
-    pub fn new(source: &str) -> Result<Self, String> {
+    pub fn new(source: &str) -> Result<Self, String>
+    where
+        BaseToken: BufferToken,
+    {
         let mut chars = source.chars().peekable();
 
         Ok(TokenBuffer {
             buffer: iter::from_fn(move || {
                 let c = chars.next()?;
 
-                match T::from_char(c, &mut chars) {
+                match BaseToken::from_char(c, &mut chars) {
                     Outcome::Token(token) => Some(Some(Ok(token))),
                     Outcome::Skip => Some(None),
                     Outcome::Unexpected => Some(Some(Err(format!("unexpected character: {c}")))),
@@ -85,40 +90,45 @@ impl<T: BufferToken> TokenBuffer<T> {
     }
 
     /// Create a new cursor into this buffer.
-    pub fn cursor(&self) -> Cursor<T> {
+    pub fn cursor(&self) -> Cursor<BaseToken> {
         Cursor::new(self)
     }
 
-    // /// Create a new stream to operate on this token buffer.
-    // pub fn stream(&self) -> ParseBuffer {
-    //     ParseBuffer::new(self.cursor())
-    // }
+    /// Create a new stream to operate on this token buffer.
+    pub fn parser(&self) -> FullBufferParser<'_, BaseToken> {
+        FullBufferParser::new(self.cursor())
+    }
 }
 
 /// Cursor into a [`TokenBuffer`], which is free to be advanced independently of other cursors
 /// in the same buffer.
-#[derive(Clone, Copy)]
-pub struct Cursor<'b, T> {
+pub struct Cursor<'b, BaseToken> {
     /// Buffer that this cursor refers to.
-    buffer: &'b TokenBuffer<T>,
+    buffer: &'b TokenBuffer<BaseToken>,
     /// Next offset into the buffer.
     offset: usize,
 }
+impl<'b, BaseToken> Clone for Cursor<'b, BaseToken> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<'b, BaseToken> Copy for Cursor<'b, BaseToken> {}
 
-impl<'b, T: BufferToken> Cursor<'b, T> {
+impl<'b, BaseToken> Cursor<'b, BaseToken> {
     /// Create a new cursor on the provided buffer.
-    pub fn new(buffer: &'b TokenBuffer<T>) -> Self {
+    pub fn new(buffer: &'b TokenBuffer<BaseToken>) -> Self {
         Self { buffer, offset: 0 }
     }
 
     /// Create a new buffer with the provided offset. There are no checks whether the offset is
     /// valid for the buffer.
-    fn new_with_offset(buffer: &'b TokenBuffer<T>, offset: usize) -> Self {
+    fn new_with_offset(buffer: &'b TokenBuffer<BaseToken>, offset: usize) -> Self {
         Self { buffer, offset }
     }
 
     /// Produce the token that the cursor is currently pointed at.
-    fn entry(&self) -> Option<&T> {
+    fn entry(&self) -> Option<&BaseToken> {
         self.buffer.get(self.offset)
     }
 
@@ -134,9 +144,9 @@ impl<'b, T: BufferToken> Cursor<'b, T> {
     }
 
     /// If the next token matches `U`, return it along with an advanced cursor.
-    pub fn token<U>(self) -> Option<(U, Self)>
+    pub fn token<T>(self) -> Option<(T, Self)>
     where
-        T: IntoToken<U>,
+        BaseToken: IntoToken<T>,
     {
         Some((self.entry()?.clone().into_token()?, self.next_cursor()))
     }
