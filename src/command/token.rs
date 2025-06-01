@@ -7,7 +7,7 @@ fn keyword_impl<'b>(cursor: Cursor<'b>, token: &str) -> Option<((), Cursor<'b>)>
     Some(((), rest))
 }
 
-fn parse_keyword(input: &mut ParseStream, token: &str) -> Result<(), String> {
+fn parse_keyword(input: ParseStream, token: &str) -> Result<(), String> {
     input.step(|cursor| keyword_impl(cursor, token).ok_or_else(|| format!("expected `{token}`")))
 }
 
@@ -32,7 +32,7 @@ fn punct_impl<'b>(mut cursor: Cursor<'b>, token: &str) -> Option<((), Cursor<'b>
     Some(((), cursor))
 }
 
-fn parse_punct(input: &mut ParseStream, token: &str) -> Result<(), String> {
+fn parse_punct(input: ParseStream, token: &str) -> Result<(), String> {
     input.step(|cursor| punct_impl(cursor, token).ok_or_else(|| format!("expected `{token}`")))
 }
 
@@ -47,7 +47,7 @@ macro_rules! define_keywords {
             pub struct $name;
 
             impl Parse for $name {
-                fn parse(input: &mut ParseStream) -> Result<Self, String> {
+                fn parse(input: ParseStream) -> Result<Self, String> {
                     parse_keyword(input, $token)?;
                     Ok(Self)
                 }
@@ -84,7 +84,7 @@ macro_rules! define_punctuation {
             pub struct $name;
 
             impl Parse for $name {
-                fn parse(input: &mut ParseStream) -> Result<Self, String> {
+                fn parse(input: ParseStream) -> Result<Self, String> {
                     parse_punct(input, $token)?;
                     Ok(Self)
                 }

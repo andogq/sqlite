@@ -88,7 +88,7 @@ impl Token for Ident {
 }
 
 impl Parse for Ident {
-    fn parse(input: &mut ParseStream) -> Result<Self, String> {
+    fn parse(input: ParseStream) -> Result<Self, String> {
         input.step(|cursor| {
             let (ident, cursor) = cursor
                 .ident()
@@ -195,8 +195,8 @@ impl TokenBuffer {
     }
 
     /// Create a new stream to operate on this token buffer.
-    pub fn stream(&self) -> ParseStream {
-        ParseStream::new(self.cursor())
+    pub fn stream(&self) -> ParseBuffer {
+        ParseBuffer::new(self.cursor())
     }
 
     /// Create a new cursor into this buffer.

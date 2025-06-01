@@ -1,5 +1,7 @@
 //! Utilities to assist with parsing items from a [`TokenBuffer`].
 
+use std::cell::Cell;
+
 use super::base::*;
 
 /// Cursor into a [`TokenBuffer`], which is free to be advanced independently of other cursors
@@ -50,45 +52,59 @@ impl<'b> Cursor<'b> {
     }
 }
 
+pub type ParseStream<'b> = &'b ParseBuffer<'b>;
+
 /// Wrapper over [`Cursor`] with convenience methods to assist with parsing.
 #[derive(Clone)]
-pub struct ParseStream<'b> {
-    cursor: Cursor<'b>,
+pub struct ParseBuffer<'b> {
+    cursor: Cell<Cursor<'b>>,
 }
 
-impl<'b> ParseStream<'b> {
+impl<'b> ParseBuffer<'b> {
     pub fn new(cursor: Cursor<'b>) -> Self {
-        Self { cursor }
+        Self {
+            cursor: Cell::new(cursor),
+        }
+    }
+
+    pub fn call<T>(
+        &'b self,
+        function: fn(ParseStream<'b>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        function(self)
     }
 
     /// Parse a token from the stream.
-    pub fn parse<T: Parse>(&mut self) -> Result<T, String> {
+    pub fn parse<T: Parse>(&'b self) -> Result<T, String> {
         T::parse(self)
-    }
-
-    /// Peek at the next token in the stream.
-    pub fn peek<T: Parse>(&self) -> bool {
-        T::parse(&mut self.clone()).is_ok()
     }
 
     /// Attempt to parse a token from the stream, only advancing the stream if the parse is
     /// successful.
     pub fn step<T>(
-        &mut self,
-        function: impl FnOnce(Cursor) -> Result<(T, Cursor), String>,
+        &'b self,
+        function: impl FnOnce(Cursor<'b>) -> Result<(T, Cursor<'b>), String>,
     ) -> Result<T, String> {
-        let (result, cursor) = function(self.cursor)?;
-        self.cursor = cursor;
+        let (result, cursor) = function(self.cursor())?;
+        self.cursor.set(cursor);
         Ok(result)
     }
 
     pub fn lookahead(&self) -> Lookahead {
-        Lookahead::new(self.cursor)
+        Lookahead::new(self.cursor())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cursor().eof()
+    }
+
+    fn cursor(&self) -> Cursor {
+        self.cursor.get()
     }
 }
 
 pub trait Parse: Sized {
-    fn parse(input: &mut ParseStream) -> Result<Self, String>;
+    fn parse(input: ParseStream) -> Result<Self, String>;
 }
 
 /// A single token.
@@ -142,5 +158,91 @@ impl<'b> Lookahead<'b> {
                 format!("expected one of: {}", self.comparisons.join(", "))
             }
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Punctuated<T, P> {
+    pairs: Vec<(T, P)>,
+    last: Option<T>,
+}
+
+impl<T, P> Punctuated<T, P> {
+    pub fn new() -> Self {
+        Self {
+            pairs: Vec::new(),
+            last: None,
+        }
+    }
+
+    pub fn parse_terminated(input: ParseStream) -> Result<Self, String>
+    where
+        T: Parse,
+        P: Parse,
+    {
+        Self::parse_terminated_with(input, T::parse)
+    }
+
+    /// Parse a punctuated stream, which must only contain `T` and `P`.
+    pub fn parse_terminated_with(
+        input: ParseStream,
+        parser: fn(ParseStream) -> Result<T, String>,
+    ) -> Result<Self, String>
+    where
+        P: Parse,
+    {
+        let mut punctuated = Self::new();
+
+        loop {
+            if input.is_empty() {
+                break;
+            }
+
+            let value = parser(input)?;
+
+            if input.is_empty() {
+                punctuated.last = Some(value);
+                break;
+            }
+
+            let punctuation = input.parse::<P>()?;
+            punctuated.pairs.push((value, punctuation));
+        }
+
+        Ok(punctuated)
+    }
+
+    /// Parse a punctuated stream, stopping if there is no more `P` in the stream. Trailing
+    /// punctuation is not allowed.
+    pub fn parse_separated_non_empty(input: ParseStream) -> Result<Self, String>
+    where
+        T: Parse,
+        P: Token + Parse,
+    {
+        Self::parse_separated_non_empty_with(input, T::parse)
+    }
+
+    pub fn parse_separated_non_empty_with(
+        input: ParseStream,
+        parser: fn(ParseStream) -> Result<T, String>,
+    ) -> Result<Self, String>
+    where
+        P: Token + Parse,
+    {
+        let mut punctuated = Self::new();
+
+        loop {
+            let value = parser(input)?;
+
+            if !P::peek(input.cursor()) {
+                punctuated.last = Some(value);
+                break;
+            }
+
+            let punct = input.parse()?;
+            punctuated.pairs.push((value, punct));
+        }
+
+        Ok(punctuated)
     }
 }

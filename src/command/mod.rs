@@ -2,9 +2,11 @@ mod base;
 mod parse;
 mod token;
 
+use parse::{ParseStream, Punctuated};
+
 use self::{
     base::{Ident, TokenBuffer},
-    parse::{Parse, ParseStream},
+    parse::Parse,
 };
 
 use crate::Token;
@@ -12,14 +14,11 @@ use crate::Token;
 #[derive(Clone, Debug)]
 enum ResultColumn {
     All(Token![*]),
-    Column(
-        // TODO: Punctuated
-        Ident,
-    ),
+    Column(Ident),
 }
 
 impl Parse for ResultColumn {
-    fn parse(input: &mut ParseStream) -> Result<Self, String> {
+    fn parse(input: ParseStream) -> Result<Self, String> {
         let mut lookahead = input.lookahead();
 
         if lookahead.peek::<Token![*]>() {
@@ -35,18 +34,17 @@ impl Parse for ResultColumn {
 #[derive(Clone, Debug)]
 struct QueryStatement {
     select: Token![select],
-    // TODO: Punctuated
-    result_column: ResultColumn,
+    result_column: Punctuated<ResultColumn, Token![,]>,
     from: Token![from],
     table_name: Ident,
     semicolon: Token![;],
 }
 
 impl Parse for QueryStatement {
-    fn parse(input: &mut ParseStream) -> Result<Self, String> {
+    fn parse(input: ParseStream) -> Result<Self, String> {
         Ok(Self {
             select: input.parse()?,
-            result_column: input.parse()?,
+            result_column: input.call(Punctuated::parse_separated_non_empty)?,
             from: input.parse()?,
             table_name: input.parse()?,
             semicolon: input.parse()?,
@@ -55,11 +53,11 @@ impl Parse for QueryStatement {
 }
 
 pub fn do_something() {
-    let command = "select some_column from some_table;";
+    let command = "select some_column, another_column from some_table;";
 
     let buffer = TokenBuffer::new(command).unwrap();
-    let mut input = buffer.stream();
+    let input = buffer.stream();
 
-    let statement = QueryStatement::parse(&mut input).unwrap();
+    let statement = QueryStatement::parse(&input).unwrap();
     dbg!(statement);
 }
