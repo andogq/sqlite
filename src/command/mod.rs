@@ -5,7 +5,7 @@ use lib_parse::{common::token::*, prelude::*};
 use self::token::*;
 
 #[derive(Clone, Debug)]
-enum ResultColumn {
+pub enum ResultColumn {
     All(Token![*]),
     Column(Ident),
 }
@@ -25,11 +25,11 @@ impl Parse<CommonToken> for ResultColumn {
 }
 
 #[derive(Clone, Debug)]
-struct QueryStatement {
+pub struct QueryStatement {
     select: Token![select],
-    result_column: Punctuated<ResultColumn, Token![,]>,
+    pub result_column: Punctuated<ResultColumn, Token![,]>,
     from: Token![from],
-    table_name: Ident,
+    pub table_name: Ident,
     semicolon: Token![;],
 }
 
@@ -45,10 +45,6 @@ impl Parse<CommonToken> for QueryStatement {
     }
 }
 
-pub fn do_something() {
-    let command = "select some_column, another_column from some_table;";
-
-    let statement = lib_parse::parse_str::<QueryStatement, CommonToken>(command).unwrap();
-
-    dbg!(statement);
+pub fn parse_command(command: &str) -> QueryStatement {
+    lib_parse::parse_str::<QueryStatement, CommonToken>(command).unwrap()
 }

@@ -11,6 +11,7 @@ use ctx::Ctx;
 use record::Record;
 
 const DATABASE: &str = "test.db";
+const COMMAND: &str = "select * from users;";
 
 #[derive(Clone, Debug)]
 struct DatabaseSchema {
@@ -57,29 +58,33 @@ fn main() {
 
                 DatabaseSchema::from(Record::from_buf(cell.row_id, &payload))
             })
+            .inspect(|schema| {
+                dbg!(schema);
+            })
             .collect::<Vec<_>>()
     };
 
-    for schema in schemas {
-        dbg!(&schema);
+    let command = command::parse_command(COMMAND);
 
-        let page = Page::<Table>::from_buffer(ctx.pager.get_page(schema.root_page));
-        btree::traverse(ctx.clone(), page)
-            .map(|cell| {
-                println!(
-                    "row id: {}, payload length: {}",
-                    cell.row_id, cell.payload.length
-                );
+    let schema = schemas
+        .iter()
+        .find(|schema| schema.name == *command.table_name)
+        .unwrap();
 
-                let mut payload = vec![0; cell.payload.length];
-                cell.payload.copy_to_slice(ctx.clone(), &mut payload);
+    let page = Page::<Table>::from_buffer(ctx.pager.get_page(schema.root_page));
+    btree::traverse(ctx.clone(), page)
+        .map(|cell| {
+            println!(
+                "row id: {}, payload length: {}",
+                cell.row_id, cell.payload.length
+            );
 
-                Record::from_buf(cell.row_id, &payload)
-            })
-            .for_each(|record| {
-                dbg!(record);
-            })
-    }
+            let mut payload = vec![0; cell.payload.length];
+            cell.payload.copy_to_slice(ctx.clone(), &mut payload);
 
-    command::do_something();
+            Record::from_buf(cell.row_id, &payload)
+        })
+        .for_each(|record| {
+            dbg!(record);
+        })
 }
