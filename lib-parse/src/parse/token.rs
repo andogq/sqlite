@@ -200,9 +200,9 @@ mod test {
         ]);
         let parser = buffer.parser();
 
-        let _something = parser.parse::<Something>().unwrap();
-        let _another = parser.parse::<Another>().unwrap();
-        let _comma = parser.parse::<Comma>().unwrap();
+        let _something = parser.parse::<Token![something]>().unwrap();
+        let _another = parser.parse::<Token![another]>().unwrap();
+        let _comma = parser.parse::<Token![,]>().unwrap();
     }
 
     #[test]
