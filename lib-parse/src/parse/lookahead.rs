@@ -76,10 +76,7 @@ mod test {
                 return false;
             };
 
-            match token {
-                BaseToken::Some(_) => true,
-                _ => false,
-            }
+            matches!(token, BaseToken::Some(_))
         }
 
         fn display() -> &'static str {
@@ -95,10 +92,7 @@ mod test {
                 return false;
             };
 
-            match token {
-                BaseToken::Other(_) => true,
-                _ => false,
-            }
+            matches!(token, BaseToken::Other(_))
         }
 
         fn display() -> &'static str {

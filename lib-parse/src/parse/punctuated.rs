@@ -97,6 +97,16 @@ impl<T, P> Punctuated<T, P> {
     pub fn len(&self) -> usize {
         self.pairs.len() + if self.last.is_some() { 1 } else { 0 }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<T, P> Default for Punctuated<T, P> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T, P> IntoIterator for Punctuated<T, P> {
@@ -153,10 +163,7 @@ mod test {
             let Some((token, _)) = cursor.token() else {
                 return false;
             };
-            match token {
-                BaseToken::Delimiter => true,
-                _ => false,
-            }
+            matches!(token, BaseToken::Delimiter)
         }
 
         fn display() -> &'static str {
