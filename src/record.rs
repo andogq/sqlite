@@ -5,6 +5,7 @@ use ux::{i24, i48};
 use crate::disk::var_int::VarInt;
 
 #[derive(Clone, Debug)]
+#[allow(unused)]
 pub enum RecordType {
     Null,
     I8(i8),
@@ -42,6 +43,7 @@ impl RecordType {
     }
 }
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct Record {
     pub id: i64,

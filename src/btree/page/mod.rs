@@ -56,6 +56,7 @@ impl<T: PageType> Deref for Page<T> {
 }
 
 /// Common attributes and functionality used across all page kinds.
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct PageCommon<T: PageType> {
     pub flag: PageFlag,
@@ -142,6 +143,7 @@ impl<T: PageType> PageCommon<T> {
 }
 
 #[derive(Clone, Debug)]
+#[allow(unused)]
 pub struct PageFlag {
     flag: u8,
 

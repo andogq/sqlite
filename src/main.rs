@@ -13,6 +13,7 @@ use record::Record;
 const DATABASE: &str = "test.db";
 const COMMAND: &str = "select * from users;";
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 struct DatabaseSchema {
     r#type: String,

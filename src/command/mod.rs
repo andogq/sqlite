@@ -4,6 +4,7 @@ use lib_parse::{common::token::*, prelude::*};
 
 use self::token::*;
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub enum ResultColumn {
     All(Token![*]),
@@ -24,6 +25,7 @@ impl Parse<CommonToken> for ResultColumn {
     }
 }
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct QueryStatement {
     select: Token![select],
