@@ -1,0 +1,34 @@
+name: Tests
+
+on:
+  push:
+
+env:
+  RUSTFLAGS: "-Dwarnings" # Turn all warnings into errors
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [lib-parse, sqlite]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --package "${{ matrix.package }}" --all-features --release --tests
+
+  clippy:
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [lib-parse, sqlite]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --package "${{ matrix.package }}" --all-features --release --tests
