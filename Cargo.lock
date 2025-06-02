@@ -313,6 +313,7 @@ dependencies = [
  "assert_layout",
  "derive-where",
  "derive_more",
+ "lib-parse",
  "num_enum",
  "rstest",
  "static_assertions",

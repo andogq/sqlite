@@ -3,8 +3,8 @@ use std::iter::{self, Peekable};
 use derive_more::{Deref, From};
 
 use crate::{
-    buffer::{BufferToken, Outcome},
-    parse::{BufferParser, Parse},
+    buffer::{BufferToken, Cursor, Outcome},
+    parse::{BufferParser, Parse, Token, token::TokenRepr},
 };
 
 /// An identifier. Can begin with any letter or an underscore, and can contain any letter, number,
@@ -29,6 +29,29 @@ impl Parse<CommonToken> for Ident {
         match parser.parse()? {
             CommonToken::Ident(ident) => Ok(ident),
             _ => Err("unexpected token (expected ident)".into()),
+        }
+    }
+}
+
+impl Token<CommonToken> for Ident {
+    fn peek(cursor: Cursor<'_, CommonToken>) -> bool {
+        let Some((token, _)) = cursor.token() else {
+            return false;
+        };
+
+        matches!(token, CommonToken::Ident(_))
+    }
+
+    fn display() -> &'static str {
+        "idententifier"
+    }
+}
+
+impl TokenRepr<CommonToken> for Ident {
+    fn from_base(base: CommonToken) -> Option<Self> {
+        match base {
+            CommonToken::Ident(ident) => Some(ident),
+            _ => None,
         }
     }
 }
@@ -58,6 +81,29 @@ impl Parse<CommonToken> for Punct {
         match parser.parse()? {
             CommonToken::Punct(punct) => Ok(punct),
             _ => Err("unexpected token (expected punct)".into()),
+        }
+    }
+}
+
+impl Token<CommonToken> for Punct {
+    fn peek(cursor: Cursor<'_, CommonToken>) -> bool {
+        let Some((token, _)) = cursor.token() else {
+            return false;
+        };
+
+        matches!(token, CommonToken::Punct(_))
+    }
+
+    fn display() -> &'static str {
+        "punctuation"
+    }
+}
+
+impl TokenRepr<CommonToken> for Punct {
+    fn from_base(base: CommonToken) -> Option<Self> {
+        match base {
+            CommonToken::Punct(punct) => Some(punct),
+            _ => None,
         }
     }
 }

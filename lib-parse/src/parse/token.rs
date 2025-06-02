@@ -90,12 +90,17 @@ macro_rules! define_tokens {
 
     ([token_macro] => { $([$token:tt] $name:ident)* }) => {
         #[macro_export]
-        macro_rules! Token {
+        macro_rules! _Token {
             // Include empty rule so empty tokens doesn't cause error.
             () => {};
 
             $([$token] => { $name };)*
         }
+
+        // Hack to work around exporting generated macros:
+        // https://github.com/rust-lang/rust/pull/52234#issuecomment-1417098097
+        #[doc(hidden)]
+        pub use _Token as Token;
     };
 }
 
@@ -108,6 +113,12 @@ pub trait TokenRepr<BaseToken>: Sized {
     ///
     /// For most base tokens which are an enum, this will just a be a match statement.
     fn from_base(base: BaseToken) -> Option<Self>;
+}
+
+impl<T> TokenRepr<T> for T {
+    fn from_base(base: T) -> Option<Self> {
+        Some(base)
+    }
 }
 
 #[cfg(test)]

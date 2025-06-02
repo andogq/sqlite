@@ -1,6 +1,6 @@
-mod lookahead;
-mod punctuated;
-mod token;
+pub mod lookahead;
+pub mod punctuated;
+pub mod token;
 
 use std::cell::Cell;
 

@@ -2,14 +2,12 @@ mod base;
 mod parse;
 mod token;
 
-use parse::{ParseStream, Punctuated};
-
-use self::{
-    base::{Ident, TokenBuffer},
-    parse::Parse,
+use lib_parse::{
+    common::token::{CommonToken, Ident},
+    parse::{BufferParser, Parse, punctuated::Punctuated},
 };
 
-use crate::Token;
+use self::token::*;
 
 #[derive(Clone, Debug)]
 enum ResultColumn {
@@ -17,8 +15,8 @@ enum ResultColumn {
     Column(Ident),
 }
 
-impl Parse for ResultColumn {
-    fn parse(input: ParseStream) -> Result<Self, String> {
+impl Parse<CommonToken> for ResultColumn {
+    fn parse(input: BufferParser<'_, CommonToken>) -> Result<Self, String> {
         let mut lookahead = input.lookahead();
 
         if lookahead.peek::<Token![*]>() {
@@ -40,11 +38,11 @@ struct QueryStatement {
     semicolon: Token![;],
 }
 
-impl Parse for QueryStatement {
-    fn parse(input: ParseStream) -> Result<Self, String> {
+impl Parse<CommonToken> for QueryStatement {
+    fn parse(input: BufferParser<'_, CommonToken>) -> Result<Self, String> {
         Ok(Self {
             select: input.parse()?,
-            result_column: input.call(Punctuated::parse_separated_non_empty)?,
+            result_column: input.parse_with(Punctuated::parse_separated_non_empty)?,
             from: input.parse()?,
             table_name: input.parse()?,
             semicolon: input.parse()?,
@@ -55,9 +53,8 @@ impl Parse for QueryStatement {
 pub fn do_something() {
     let command = "select some_column, another_column from some_table;";
 
-    let buffer = TokenBuffer::new(command).unwrap();
-    let input = buffer.stream();
+    let statement =
+        lib_parse::parse::entrypoint::parse_str::<QueryStatement, CommonToken>(command).unwrap();
 
-    let statement = QueryStatement::parse(&input).unwrap();
     dbg!(statement);
 }
