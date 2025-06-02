@@ -4,7 +4,7 @@ pub mod token;
 
 use std::cell::Cell;
 
-pub use self::lookahead::Lookahead;
+pub use self::{lookahead::Lookahead, punctuated::Punctuated, token::TokenRepr};
 
 use crate::buffer::{BufferToken, Cursor, TokenBuffer};
 

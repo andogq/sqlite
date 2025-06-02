@@ -1,9 +1,6 @@
 mod token;
 
-use lib_parse::{
-    common::token::{CommonToken, Ident},
-    parse::{BufferParser, Parse, punctuated::Punctuated},
-};
+use lib_parse::{common::token::*, prelude::*};
 
 use self::token::*;
 
@@ -51,8 +48,7 @@ impl Parse<CommonToken> for QueryStatement {
 pub fn do_something() {
     let command = "select some_column, another_column from some_table;";
 
-    let statement =
-        lib_parse::parse::entrypoint::parse_str::<QueryStatement, CommonToken>(command).unwrap();
+    let statement = lib_parse::parse_str::<QueryStatement, CommonToken>(command).unwrap();
 
     dbg!(statement);
 }

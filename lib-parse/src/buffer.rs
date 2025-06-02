@@ -113,12 +113,6 @@ impl<'b, BaseToken> Cursor<'b, BaseToken> {
         Self { buffer, offset: 0 }
     }
 
-    /// Create a new buffer with the provided offset. There are no checks whether the offset is
-    /// valid for the buffer.
-    fn new_with_offset(buffer: &'b TokenBuffer<BaseToken>, offset: usize) -> Self {
-        Self { buffer, offset }
-    }
-
     /// Produce the token that the cursor is currently pointed at.
     fn entry(&self) -> Option<&BaseToken> {
         self.buffer.get(self.offset)
@@ -233,7 +227,10 @@ mod test {
         #[case("aaaaa", 5, false)]
         fn entry(#[case] source: &str, #[case] offset: usize, #[case] present: bool) {
             let buffer = TokenBuffer::<A>::new(source).unwrap();
-            let cursor = Cursor::new_with_offset(&buffer, offset);
+            let cursor = Cursor {
+                buffer: &buffer,
+                offset,
+            };
 
             assert_eq!(cursor.entry().is_some(), present);
         }
