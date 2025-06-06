@@ -2,7 +2,6 @@ mod token;
 
 use lib_parse::{
     common::{delimiter::Parenthesis, token::*},
-    parse::FullBufferParser,
     prelude::*,
 };
 
@@ -55,6 +54,7 @@ pub fn parse_command<T: Parse<CommonToken>>(command: &str) -> T {
     lib_parse::parse_str(command).unwrap()
 }
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct ColumnDef {
     pub column_name: Ident,
@@ -83,6 +83,7 @@ impl Parse<CommonToken> for ColumnDef {
     }
 }
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct CreateStatement {
     create: Token![create],
