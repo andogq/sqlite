@@ -84,7 +84,9 @@ impl Parse<CommonToken> for Punct {
     fn parse(parser: BufferParser<'_, CommonToken>) -> Result<Self, String> {
         match parser.parse()? {
             CommonToken::Punct(punct) => Ok(punct),
-            _ => Err("unexpected token (expected punct)".into()),
+            token => Err(format!(
+                "unexpected token (expected punct, found {token:?})"
+            )),
         }
     }
 }

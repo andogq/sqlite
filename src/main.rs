@@ -50,18 +50,10 @@ fn main() {
 
         btree::traverse(ctx.clone(), page)
             .map(|cell| {
-                println!(
-                    "row id: {}, payload length: {}",
-                    cell.row_id, cell.payload.length
-                );
-
                 let mut payload = vec![0; cell.payload.length];
                 cell.payload.copy_to_slice(ctx.clone(), &mut payload);
 
                 DatabaseSchema::from(Record::from_buf(cell.row_id, &payload))
-            })
-            .inspect(|schema| {
-                dbg!(schema);
             })
             .collect::<Vec<_>>()
     };
@@ -73,22 +65,23 @@ fn main() {
         .find(|schema| schema.name == *command.table_name)
         .unwrap();
 
-    let columns = command::parse_command::<CreateStatement>(&schema.sql);
+    let columns = command::parse_command::<CreateStatement>(&schema.sql.to_lowercase())
+        .columns
+        .into_iter()
+        .collect::<Vec<_>>();
 
     let page = Page::<Table>::from_buffer(ctx.pager.get_page(schema.root_page));
     btree::traverse(ctx.clone(), page)
         .map(|cell| {
-            println!(
-                "row id: {}, payload length: {}",
-                cell.row_id, cell.payload.length
-            );
-
             let mut payload = vec![0; cell.payload.length];
             cell.payload.copy_to_slice(ctx.clone(), &mut payload);
 
             Record::from_buf(cell.row_id, &payload)
         })
         .for_each(|record| {
-            dbg!(record);
+            columns.iter().zip(record.fields).for_each(|(col, value)| {
+                println!("{} ({}): {:?}", *col.column_name, *col.type_name, value);
+            });
+            println!();
         })
 }

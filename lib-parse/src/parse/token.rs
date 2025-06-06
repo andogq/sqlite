@@ -30,7 +30,7 @@ macro_rules! define_tokens {
         $crate::define_tokens!([token_macro] => { $($($tokens)*)* });
     };
 
-    ([impl] => $repr:ty $([$is_fn:ident])? { $([$token:tt] $name:ident)* }) => {
+    ([impl] => $repr:ty $([$is_fn:ident])? { $([$token:tt] $name:ident $(($($modifier:ident)*))?)* }) => {
         $(
             #[doc = concat!("Token corresponding to `", stringify!($token), "`.")]
             #[doc = concat!("Reference type with `Token![", stringify!($token), "]` instead.")]

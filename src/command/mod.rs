@@ -59,6 +59,7 @@ pub fn parse_command<T: Parse<CommonToken>>(command: &str) -> T {
 pub struct ColumnDef {
     pub column_name: Ident,
     pub type_name: Ident,
+    pub not_null: bool,
 }
 
 impl Parse<CommonToken> for ColumnDef {
@@ -66,6 +67,18 @@ impl Parse<CommonToken> for ColumnDef {
         Ok(Self {
             column_name: parser.parse()?,
             type_name: parser.parse()?,
+            not_null: {
+                let mut look = parser.lookahead();
+
+                if look.peek::<Token![not]>() {
+                    parser.parse::<Token![not]>()?;
+                    parser.parse::<Token![null]>()?;
+
+                    true
+                } else {
+                    false
+                }
+            },
         })
     }
 }
@@ -76,7 +89,6 @@ pub struct CreateStatement {
     table: Token![table],
     pub table_name: Ident,
     pub columns: Punctuated<ColumnDef, Token![,]>,
-    semicolon: Token![;],
 }
 
 impl Parse<CommonToken> for CreateStatement {
@@ -88,9 +100,8 @@ impl Parse<CommonToken> for CreateStatement {
             columns: {
                 let (_parens, group) = parser.group::<Parenthesis>()?;
 
-                group.parse_with(Punctuated::parse_separated_non_empty)?
+                group.parse_with(Punctuated::parse_terminated)?
             },
-            semicolon: parser.parse()?,
         })
     }
 }
