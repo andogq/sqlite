@@ -7,6 +7,7 @@ mod record;
 use std::fs::File;
 
 use self::btree::page::{Page, PageExt, Table};
+use command::{CreateStatement, QueryStatement};
 use ctx::Ctx;
 use record::Record;
 
@@ -65,12 +66,14 @@ fn main() {
             .collect::<Vec<_>>()
     };
 
-    let command = command::parse_command(COMMAND);
+    let command = command::parse_command::<QueryStatement>(COMMAND);
 
     let schema = schemas
         .iter()
         .find(|schema| schema.name == *command.table_name)
         .unwrap();
+
+    let columns = command::parse_command::<CreateStatement>(&schema.sql);
 
     let page = Page::<Table>::from_buffer(ctx.pager.get_page(schema.root_page));
     btree::traverse(ctx.clone(), page)

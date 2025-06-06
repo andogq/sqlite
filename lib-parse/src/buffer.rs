@@ -96,7 +96,7 @@ impl<BaseToken> TokenBuffer<BaseToken> {
 /// in the same buffer.
 pub struct Cursor<'b, BaseToken> {
     /// Buffer that this cursor refers to.
-    buffer: &'b TokenBuffer<BaseToken>,
+    buffer: &'b [BaseToken],
     /// Next offset into the buffer.
     offset: usize,
 }
@@ -109,7 +109,7 @@ impl<'b, BaseToken> Copy for Cursor<'b, BaseToken> {}
 
 impl<'b, BaseToken> Cursor<'b, BaseToken> {
     /// Create a new cursor on the provided buffer.
-    pub fn new(buffer: &'b TokenBuffer<BaseToken>) -> Self {
+    pub fn new(buffer: &'b [BaseToken]) -> Self {
         Self { buffer, offset: 0 }
     }
 
@@ -119,9 +119,18 @@ impl<'b, BaseToken> Cursor<'b, BaseToken> {
     }
 
     /// Consume the current cursor, and create a new cursor which points to the next token.
-    fn next_cursor(mut self) -> Self {
+    pub(crate) fn next_cursor(mut self) -> Self {
         self.offset += 1;
         self
+    }
+
+    /// Split this cursor into two cursors, one which will advance until `offset` (exclusive), and
+    /// another which will start from `offset` and advance till the end of the buffer.
+    pub(crate) fn split_cursor(self, offset: usize) -> (Self, Self) {
+        (
+            Self::new(&self.buffer[self.offset..self.offset + offset]),
+            Self::new(&self.buffer[self.offset + offset..]),
+        )
     }
 
     /// Determine if the cursor is at the end of the buffer.
@@ -129,7 +138,7 @@ impl<'b, BaseToken> Cursor<'b, BaseToken> {
         self.offset >= self.buffer.len()
     }
 
-    /// If the next token matches `T`, return it along with an advanced cursor.
+    /// Produce the next token, and the next cursor.
     pub fn token(self) -> Option<(BaseToken, Self)>
     where
         BaseToken: Clone,
@@ -142,6 +151,7 @@ impl<'b, BaseToken> Cursor<'b, BaseToken> {
 mod test {
     use super::*;
 
+    use derive_more::From;
     use rstest::rstest;
 
     /// Token parsed from a character.
@@ -266,6 +276,40 @@ mod test {
                 let (_token, cursor) = cursor.token().unwrap();
                 assert_eq!(cursor.offset, 1);
                 assert!(cursor.eof())
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, From)]
+    struct CharToken(char);
+
+    #[rstest]
+    #[case(vec!['a'.into(), 'b'.into()], 0, 1, Some('a'), Some('b'))]
+    #[case(vec!['a'.into(), 'b'.into()], 1, 1, Some('b'), None)]
+    #[case(vec!['a'.into(), 'b'.into()], 0, 0, None, Some('a'))]
+    fn split_cursor(
+        #[case] tokens: Vec<CharToken>,
+        #[case] start_offset: usize,
+        #[case] offset: usize,
+        #[case] first_expected: Option<char>,
+        #[case] second_expected: Option<char>,
+    ) {
+        let buffer = TokenBuffer::new_with_tokens(tokens);
+        let cursor = Cursor {
+            buffer: &buffer,
+            offset: start_offset,
+        };
+
+        let (cursor_a, cursor_b) = cursor.split_cursor(offset);
+
+        for (cursor, expected) in [(cursor_a, first_expected), (cursor_b, second_expected)] {
+            match (cursor.token().map(|(tok, _)| tok), expected) {
+                (Some(cursor), Some(expected)) => {
+                    assert_eq!(cursor.0, expected);
+                }
+                (None, None) => {}
+                (Some(_), None) => panic!("no token expected, but one produced"),
+                (None, Some(_)) => panic!("token expected, but none produced"),
             }
         }
     }

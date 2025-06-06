@@ -62,6 +62,8 @@ pub enum Punct {
     Asterisk,
     Comma,
     Semicolon,
+    LeftSmooth,
+    RightSmooth,
 }
 
 impl<S: ?Sized + AsRef<str>> PartialEq<S> for Punct {
@@ -70,6 +72,8 @@ impl<S: ?Sized + AsRef<str>> PartialEq<S> for Punct {
             Punct::Asterisk => "*",
             Punct::Comma => ",",
             Punct::Semicolon => ";",
+            Punct::LeftSmooth => "(",
+            Punct::RightSmooth => ")",
         };
 
         c == other.as_ref()
@@ -133,6 +137,8 @@ impl BufferToken for CommonToken {
                     '*' => Punct::Asterisk,
                     ',' => Punct::Comma,
                     ';' => Punct::Semicolon,
+                    '(' => Punct::LeftSmooth,
+                    ')' => Punct::RightSmooth,
                     _ => return Outcome::Unexpected,
                 }
                 .into(),

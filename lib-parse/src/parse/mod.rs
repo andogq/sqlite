@@ -2,7 +2,9 @@ pub mod lookahead;
 pub mod punctuated;
 pub mod token;
 
-use std::cell::Cell;
+use std::{cell::Cell, marker::PhantomData};
+
+use derive_more::Deref;
 
 pub use self::{lookahead::Lookahead, punctuated::Punctuated, token::TokenRepr};
 
@@ -13,7 +15,9 @@ pub mod entrypoint {
     use super::*;
 
     /// Parse `T` from a string. Will use `BaseToken` as the low-level token when parsing.
-    pub fn parse_str<T: Parse<BaseToken>, BaseToken: BufferToken>(s: &str) -> Result<T, String> {
+    pub fn parse_str<T: Parse<BaseToken>, BaseToken: BufferToken + 'static>(
+        s: &str,
+    ) -> Result<T, String> {
         let buffer = TokenBuffer::<BaseToken>::new(s)?;
         let parser = buffer.parser();
 
@@ -51,19 +55,23 @@ pub type BufferParser<'b, BaseToken> = &'b FullBufferParser<'b, BaseToken>;
 
 /// A parser which operates over a [`TokenBuffer`] containing `BaseToken`s with a [`Cursor`].
 #[derive(Clone)]
-pub struct FullBufferParser<'b, BaseToken> {
+pub struct FullBufferParser<'b, BaseToken: 'static> {
     /// Current location of this parser.
     ///
     /// [`Cell`] provides mutable access behind a reference, which is required for
     /// [`BufferParser`].
-    cursor: Cell<Cursor<'b, BaseToken>>,
+    cursor: Cell<Cursor<'static, BaseToken>>,
+    marker: PhantomData<Cursor<'b, BaseToken>>,
 }
 
 impl<'b, BaseToken> FullBufferParser<'b, BaseToken> {
     /// Create a new parser from a [`Cursor`].
-    pub fn new(cursor: Cursor<'b, BaseToken>) -> Self {
+    pub(crate) fn new(cursor: Cursor<'b, BaseToken>) -> Self {
         Self {
-            cursor: Cell::new(cursor),
+            cursor: Cell::new(unsafe {
+                std::mem::transmute::<Cursor<'b, BaseToken>, Cursor<'static, BaseToken>>(cursor)
+            }),
+            marker: PhantomData,
         }
     }
 
@@ -83,12 +91,59 @@ impl<'b, BaseToken> FullBufferParser<'b, BaseToken> {
     /// Attempt to parse a token from the stream, only advancing the stream if the parse is
     /// successful.
     pub fn step<T>(
-        &'b self,
-        function: impl FnOnce(Cursor<'b, BaseToken>) -> Result<(T, Cursor<'b, BaseToken>), String>,
+        &self,
+        function: impl for<'c> FnOnce(
+            StepCursor<'c, 'b, BaseToken>,
+        ) -> Result<(T, Cursor<'c, BaseToken>), String>,
     ) -> Result<T, String> {
-        let (result, cursor) = function(self.cursor())?;
+        let (result, cursor) = function(StepCursor {
+            marker: PhantomData,
+            cursor: self.cursor.get(),
+        })?;
         self.cursor.set(cursor);
         Ok(result)
+    }
+
+    pub fn group<D: Delimiter<BaseToken>>(
+        &self,
+    ) -> Result<(D, FullBufferParser<'b, BaseToken>), String> {
+        let opening = self.parse::<D::Left>()?;
+        let cursor = self.cursor();
+
+        let offset = self
+            .step(|step_cursor| {
+                let mut cursor = *step_cursor;
+
+                // Scan ahead to find the closing delimiter
+                let mut offset = 0;
+                let mut depth = 0;
+
+                loop {
+                    if D::Right::peek(cursor) {
+                        if depth == 0 {
+                            break;
+                        }
+
+                        depth -= 1;
+                    }
+
+                    if D::Left::peek(cursor) {
+                        depth += 1;
+                    }
+
+                    offset += 1;
+                    cursor = cursor.next_cursor();
+                }
+
+                Ok((offset, cursor))
+            })
+            .unwrap();
+
+        let (inner, _after) = cursor.split_cursor(offset);
+
+        let closing = self.parse::<D::Right>()?;
+
+        Ok((D::new(opening, closing), FullBufferParser::new(inner)))
     }
 
     /// Begin a lookahead from this position in the buffer.
@@ -105,6 +160,20 @@ impl<'b, BaseToken> FullBufferParser<'b, BaseToken> {
     fn cursor(&self) -> Cursor<'b, BaseToken> {
         self.cursor.get()
     }
+}
+
+#[derive(Deref)]
+pub struct StepCursor<'c, 'b, BaseToken> {
+    #[deref]
+    cursor: Cursor<'c, BaseToken>,
+    marker: PhantomData<fn(Cursor<'c, BaseToken>) -> Cursor<'b, BaseToken>>,
+}
+
+pub trait Delimiter<BaseToken> {
+    type Left: Parse<BaseToken> + Token<BaseToken>;
+    type Right: Parse<BaseToken> + Token<BaseToken>;
+
+    fn new(left: Self::Left, right: Self::Right) -> Self;
 }
 
 #[cfg(test)]
